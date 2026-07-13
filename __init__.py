@@ -167,7 +167,8 @@ def _on_pre_llm_call(
 
     if len(user_message.strip()) < 15 and not is_first_turn:
         return None
-    if "[meboya_guide]" in user_message:
+    # Don't double-inject if EITHER guide already present
+    if "[meboya_guide]" in user_message or "[world_model_guide]" in user_message:
         return None
 
     guide = DEPTH_PROMPTS.get(_state.depth, MEDIUM_PROMPT)
@@ -221,20 +222,27 @@ def _on_transform_llm_output(response_text: str = "", **_: Any) -> Optional[str]
 
     if not _state.show_markers:
         return None
+    # Strip both Meboya and legacy DOGA markers
     cleaned = re.sub(
         r"\[meboya_guide\].*?\[/meboya_guide\]",
         "",
         response_text,
         flags=re.DOTALL,
     )
+    cleaned = re.sub(
+        r"\[world_model_guide\].*?\[/world_model_guide\]",
+        "",
+        cleaned,
+        flags=re.DOTALL,
+    )
     return cleaned if cleaned != response_text else None
 
 
 # ──────────────────────────────────────────────────────────────────────
-# /thinking command
+# /meboya command
 # ──────────────────────────────────────────────────────────────────────
 
-def _cmd_thinking(args: str, **_: Any) -> str:
+def _cmd_meboya(args: str, **_: Any) -> str:
     a = (args or "").strip().lower()
 
     if a == "on":
@@ -260,7 +268,7 @@ def _cmd_thinking(args: str, **_: Any) -> str:
                 return f"🎯 Depth set to {d}"
         except (IndexError, ValueError):
             pass
-        return "Usage: /thinking depth 1|2|3"
+        return "Usage: /meboya depth 1|2|3"
     if a == "markers on":
         _state.show_markers = True
         return "🏷️ Markers ON"
@@ -281,7 +289,7 @@ def _cmd_thinking(args: str, **_: Any) -> str:
         return "\n".join(lines)
 
     return (
-        "Usage: /thinking [on|off|status|depth 1-3|markers on|off|recall]\n"
+        "Usage: /meboya [on|off|status|depth 1-3|markers on|off|recall]\n"
         "  depth 1 = goal only\n"
         "  depth 2 = goal + hats (default)\n"
         "  depth 3 = depth 2 + reason_deeper"
@@ -296,9 +304,9 @@ def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("transform_llm_output", _on_transform_llm_output)
     ctx.register_command(
-        name="thinking",
+        name="meboya",
         description="Configure Meboya (on/off/status/depth/recall)",
-        handler=_cmd_thinking,
+        handler=_cmd_meboya,
         args_hint="[on|off|status|depth 1-3|markers on|off|recall]",
     )
     logger.info(
