@@ -1,0 +1,12 @@
+name: auto-thinking
+version: "0.1.0"
+description: "Auto-inject De Bono Six Hats + Goal Detection thinking framework. Zero deps, no Mnemosyne required."
+author: "hermes"
+hooks:
+  - pre_llm_call
+  - transform_llm_output
+tools: []
+commands:
+  - name: thinking
+    description: "Configure auto-thinking behavior: on/off/status/depth"
+    args_hint: "[on|off|status|depth 1-3]"
