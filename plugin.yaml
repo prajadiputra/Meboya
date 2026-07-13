@@ -1,12 +1,13 @@
-name: auto-thinking
-version: "0.1.0"
-description: "Auto-inject De Bono Six Hats + Goal Detection thinking framework. Zero deps, no Mnemosyne required."
-author: "hermes"
+name: meboya
+version: "0.2.0"
+description: "Meboya — Balinese for 'questioning everything'. Auto-thinking with Six Hats + Goal Detection + Mnemosyne."
+author: "prajadiputra"
+license: MIT
+homepage: "https://github.com/prajadiputra/Meboya"
 hooks:
   - pre_llm_call
   - transform_llm_output
-tools: []
 commands:
   - name: thinking
-    description: "Configure auto-thinking behavior: on/off/status/depth"
-    args_hint: "[on|off|status|depth 1-3]"
+    description: "Configure Meboya (on/off/status/depth/recall)"
+    args_hint: "[on|off|status|depth 1-3|markers on|off|recall]"
