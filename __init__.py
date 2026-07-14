@@ -202,8 +202,46 @@ def _on_pre_llm_call(
     return injection
 
 
+_WORLD_MODEL_RE = re.compile(
+    r"<world_model>\s*(.*?)\s*</world_model>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _extract_world_model(text: str) -> Tuple[List[str], str]:
+    """Extract <world_model>...</world_model> blocks (returns blocks, remaining)."""
+    blocks: List[str] = []
+    remaining = text
+    while True:
+        match = _WORLD_MODEL_RE.search(remaining)
+        if not match:
+            break
+        blocks.append(match.group(1).strip())
+        remaining = remaining[:match.start()] + remaining[match.end():]
+    return blocks, remaining.strip()
+
+
+def _format_thinking_panel(blocks: List[str]) -> str:
+    """Format world_model blocks into a clean Meboya panel."""
+    non_empty = [b for b in blocks if b.strip()]
+    if not non_empty:
+        return ""
+    lines = ["[MEBOYA: Telaah Proses]"]
+    lines.append("   " + "=" * 50)
+    for i, block in enumerate(non_empty, 1):
+        if i > 1:
+            lines.append("")
+            lines.append("   . . . . . . . . . . . . . . . . . . . . . . . . . .")
+            lines.append("")
+        for line in block.strip().split("\n"):
+            lines.append(f"   {line}")
+    lines.append("")
+    lines.append("   " + "=" * 50)
+    return "\n".join(lines)
+
+
 def _on_transform_llm_output(response_text: str = "", **_: Any) -> Optional[str]:
-    """Strip guide markers and (optionally) write goal pattern to Mnemosyne."""
+    """Strip guide markers, format world_model blocks, write goal to Mnemosyne."""
     if _state.last_user_message and response_text:
         goal_type = _detect_goal_type(response_text)
         c_label, c_score = _detect_complexity(_state.last_user_message)
@@ -222,7 +260,8 @@ def _on_transform_llm_output(response_text: str = "", **_: Any) -> Optional[str]
 
     if not _state.show_markers:
         return None
-    # Strip both Meboya and legacy DOGA markers
+
+    # First: strip guide markers
     cleaned = re.sub(
         r"\[meboya_guide\].*?\[/meboya_guide\]",
         "",
@@ -235,6 +274,21 @@ def _on_transform_llm_output(response_text: str = "", **_: Any) -> Optional[str]
         cleaned,
         flags=re.DOTALL,
     )
+
+    # Extract world_model reasoning blocks → reformat as Meboya panel
+    blocks, final_answer = _extract_world_model(cleaned)
+    if blocks:
+        panel = _format_thinking_panel(blocks)
+        if panel:
+            cleaned = f"{panel}\n\n[Response]\n{final_answer}"
+
+    # Strip leaked raw tags
+    cleaned = re.sub(
+        r"</?world_model>\s*",
+        "",
+        cleaned,
+        flags=re.I,
+    ).strip()
     return cleaned if cleaned != response_text else None
 
 
