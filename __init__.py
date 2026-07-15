@@ -144,6 +144,65 @@ class ComplexityFeatures:
 
 
 TECH_TERMS = {
+    # Infra & networking
+    "cloudflare",
+    "gateway",
+    "ingress",
+    "dns",
+    "cdn",
+    "load balancer",
+    "load-balancer",
+    "lb",
+    "reverse proxy",
+    "tls",
+    "ssl",
+    "cert",
+    "cname",
+    "a record",
+    "txt record",
+    "mx record",
+    # Servers & cloud
+    "server",
+    "deploy",
+    "deployment",
+    "cluster",
+    "instance",
+    "vm",
+    "vps",
+    "hosting",
+    "domain",
+    # Cloudflare-specific
+    "tunnel",
+    "cloudflared",
+    "warp",
+    "workers",
+    "pages",
+    "r2",
+    "d1",
+    "kv",
+    "zone",
+    "dns_record",
+    "waf rule",
+    "rate limit",
+    # Status / live queries (auto-promote to medium)
+    "status",
+    "current",
+    "saat ini",
+    "live",
+    "real-time",
+    "realtime",
+    "now",
+    "check",
+    "cek",
+    "monitoring",
+    "monitor",
+    "alert",
+    "incident",
+    "downtime",
+    "outage",
+    "uptime",
+    "health check",
+    # Original technical terms below
     "kubernetes",
     "docker",
     "aws",
@@ -176,7 +235,6 @@ TECH_TERMS = {
     "regression",
     "ci/cd",
     "pipeline",
-    "deployment",
     "monitoring",
     "observability",
     "tracing",
@@ -185,7 +243,6 @@ TECH_TERMS = {
     "slo",
     "sli",
     "error budget",
-    "incident",
     "postmortem",
     "root cause",
     "capacity planning",
@@ -269,12 +326,19 @@ def assess_complexity(text: str) -> str:
 
     # Scoring (tuned for infra/technical)
     score = 0
-    score += min(features.length // 100, 8)  # Lebih sensitif panjang
-    score += min(features.question_marks * 2, 5) # Pertanyaan bobot lebih
-    score += min(features.code_blocks * 3, 6) # Ada kode = high
-    score += min(features.technical_terms * 2, 8) # Infra term bobot tinggi
+    score += min(features.length // 80, 8)  # Lebih sensitif
+    score += min(features.question_marks * 2, 5)
+    score += min(features.code_blocks * 3, 6)
+    score += min(features.technical_terms * 3, 12)  # Term bobot tinggi
     score += min(features.conditional_keywords * 1.5, 6)
     score += min(features.multi_part * 2, 5)
+
+    # Auto-promote: any technical term → minimum medium
+    if features.technical_terms >= 1:
+        score = max(score, 8)
+    # 2+ tech terms → minimum high
+    if features.technical_terms >= 2:
+        score = max(score, 16)
 
     if score <= 6:
         return "low"
