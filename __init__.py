@@ -267,18 +267,18 @@ def assess_complexity(text: str) -> str:
     features.technical_terms = sum(1 for term in TECH_TERMS if term in lower)
     features.conditional_keywords = sum(1 for kw in CONDITIONAL_KEYWORDS if kw in lower)
 
-    # Scoring (tuned from DOGA)
+    # Scoring (tuned for infra/technical)
     score = 0
-    score += min(features.length // 200, 5)
-    score += min(features.question_marks, 3)
-    score += min(features.code_blocks, 2)
-    score += min(features.technical_terms // 3, 5)
-    score += min(features.conditional_keywords // 2, 4)
-    score += min(features.multi_part // 2, 3)
+    score += min(features.length // 100, 8)  # Lebih sensitif panjang
+    score += min(features.question_marks * 2, 5) # Pertanyaan bobot lebih
+    score += min(features.code_blocks * 3, 6) # Ada kode = high
+    score += min(features.technical_terms * 2, 8) # Infra term bobot tinggi
+    score += min(features.conditional_keywords * 1.5, 6)
+    score += min(features.multi_part * 2, 5)
 
-    if score <= 4:
+    if score <= 6:
         return "low"
-    elif score <= 9:
+    elif score <= 15:
         return "medium"
     return "high"
 
