@@ -711,6 +711,7 @@ class PluginState:
     _active_hats: List[str] = field(default_factory=list)
     _current_user_message: str = ""
     _stop_sent: bool = False
+    _tools_called_this_turn: List[str] = field(default_factory=list)
 
 
 _state = PluginState()
@@ -920,6 +921,23 @@ async def on_post_llm_call(
         show_simulation=_state.show_simulation,
         active_hats=active_hats,
     )
+
+    # Append decision trace if hats were used or tools were called
+    if _state.show_simulation and (active_hats or _state._tools_called_this_turn):
+        trace_parts = []
+        trace_parts.append(f"📊 **Meboya Decision Trace**")
+        trace_parts.append(f"Depth: {_state.depth} | Hats: {len(active_hats)}/6 | Tools: {len(_state._tools_called_this_turn)}")
+        if active_hats:
+            trace_parts.append(f"Hats used: {' → '.join(h.upper() for h in active_hats)}")
+        if _state._tools_called_this_turn:
+            trace_parts.append(f"Tools called: {', '.join(_state._tools_called_this_turn)}")
+        if _state._recursion_depth > 0:
+            trace_parts.append(f"Reasoning levels: {_state._recursion_depth}")
+        formatted += "\n\n" + "\n".join(trace_parts)
+
+    # Reset per-turn state
+    _state._tools_called_this_turn = []
+
     return formatted if formatted != response_text else None
 
 
@@ -935,6 +953,10 @@ async def on_post_tool_call(
     **_: Any,
 ) -> None:
     """Track simulate/reason_deeper usage."""
+    # Track any tool call this turn for decision trace
+    if tool_name not in _state._tools_called_this_turn:
+        _state._tools_called_this_turn.append(tool_name)
+
     if tool_name == "simulate" and isinstance(result, str):
         logger.debug("meboya simulate called, result_len=%d", len(result))
     elif tool_name == "reason_deeper" and isinstance(args, dict):
