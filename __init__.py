@@ -930,8 +930,8 @@ def register(ctx: Any) -> None:
     ctx.register_hook("post_llm_call", on_post_llm_call)
     ctx.register_hook("post_tool_call", on_post_tool_call)
 
-    ctx.register_tool("simulate", SIMULATE_SCHEMA, simulate_tool_handler)
-    ctx.register_tool("reason_deeper", REASON_DEEPER_SCHEMA, reason_deeper_tool_handler)
+    ctx.register_tool("simulate", "meboya", SIMULATE_SCHEMA, simulate_tool_handler)
+    ctx.register_tool("reason_deeper", "meboya", REASON_DEEPER_SCHEMA, reason_deeper_tool_handler)
 
     ctx.register_cli_command("meboya", handle_meboya_command, "Meboya auto-thinking (DOGA parity)")
 
