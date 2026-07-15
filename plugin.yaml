@@ -1,11 +1,15 @@
 name: meboya
-version: "0.2.0"
-description: "Meboya — Balinese for 'questioning everything'. Auto-thinking with Six Hats + Goal Detection + Mnemosyne."
+version: "1.0.0"
+description: "Auto-thinking with De Bono Six Hats + Monte Carlo simulation + recursive reasoning (DOGA parity)."
 author: "prajadiputra"
 license: MIT
 homepage: "https://github.com/prajadiputra/Meboya"
 hooks:
   - pre_llm_call
-  - transform_llm_output
+  - post_llm_call
+  - post_tool_call
 commands:
   - meboya
+tools:
+  - simulate
+  - reason_deeper
