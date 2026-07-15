@@ -858,29 +858,23 @@ COMMAND_HELP = """
 def handle_meboya_command(cmd: str) -> str:
     """Parse and execute /meboya slash command."""
     parts = cmd.strip().split()
-    if len(parts) < 2:
-        return COMMAND_HELP
+    # cmd passed here is just the args (e.g., "status"), NOT "/meboya status"
+    if not parts:
+        return _meboya_status_str()
 
-    sub = parts[1].lower()
+    sub = parts[0].lower()
 
     if sub == "on":
         _state.enabled = True
         return "✅ Meboya enabled"
     elif sub == "off":
         _state.enabled = False
-        return "⏸️ Meboya disabled"
+        return "⏸️  Meboya disabled"
     elif sub == "status":
-        return f"""**Meboya Status**
-Enabled: {_state.enabled}
-Auto-depth: {_state.auto_depth} (fixed: {_state.depth})
-Hats: {_state.hats_enabled}
-Simulation display: {_state.show_simulation}
-Memory: {_state.memory_enabled}
-Max recursion: {_state.max_recursion}
-Mnemosyne: {'available' if MNEMOSYNE_AVAILABLE else 'not installed'}"""
-    elif sub == "depth" and len(parts) >= 3:
+        return _meboya_status_str()
+    elif sub == "depth" and len(parts) >= 2:
         try:
-            d = int(parts[2])
+            d = int(parts[1])
             if 1 <= d <= 5:
                 _state.depth = d
                 _state.auto_depth = False
@@ -891,32 +885,44 @@ Mnemosyne: {'available' if MNEMOSYNE_AVAILABLE else 'not installed'}"""
     elif sub == "auto":
         _state.auto_depth = True
         return "🔄 Auto-depth enabled"
-    elif sub == "hats" and len(parts) >= 3:
-        _state.hats_enabled = parts[2].lower() == "on"
+    elif sub == "hats" and len(parts) >= 2:
+        _state.hats_enabled = parts[1].lower() == "on"
         return f"🎩 Hats {'enabled' if _state.hats_enabled else 'disabled'}"
-    elif sub == "sim" and len(parts) >= 3:
-        _state.show_simulation = parts[2].lower() == "on"
+    elif sub == "sim" and len(parts) >= 2:
+        _state.show_simulation = parts[1].lower() == "on"
         return f"📊 Simulation display {'enabled' if _state.show_simulation else 'disabled'}"
-    elif sub == "memory" and len(parts) >= 3:
-        _state.memory_enabled = parts[2].lower() == "on"
+    elif sub == "memory" and len(parts) >= 2:
+        _state.memory_enabled = parts[1].lower() == "on"
         return f"🧠 Memory {'enabled' if _state.memory_enabled else 'disabled'}"
-    elif sub == "max-recursion" and len(parts) >= 3:
+    elif sub == "max-recursion" and len(parts) >= 2:
         try:
-            mr = int(parts[2])
+            mr = int(parts[1])
             if 1 <= mr <= 5:
                 _state.max_recursion = mr
                 return f"🔁 Max recursion set to {mr}"
         except ValueError:
             pass
         return "Usage: /meboya max-recursion <1-5>"
-    elif sub == "test" and len(parts) >= 3:
-        test_msg = " ".join(parts[2:])
+    elif sub == "test" and len(parts) >= 2:
+        test_msg = " ".join(parts[1:])
         complexity = assess_complexity(test_msg)
         depth = depth_from_complexity(complexity) if _state.auto_depth else _state.depth
         guidance = build_goal_prompt(test_msg, depth=depth, hats_enabled=_state.hats_enabled)
         return f"**Test Injection** (complexity={complexity}, depth={depth}):\n\n{guidance}"
 
     return COMMAND_HELP
+
+
+def _meboya_status_str() -> str:
+    """Format and return current status."""
+    return f"""**Meboya Status**
+Enabled: {_state.enabled}
+Auto-depth: {_state.auto_depth} (fixed: {_state.depth})
+Hats: {_state.hats_enabled}
+Simulation display: {_state.show_simulation}
+Memory: {_state.memory_enabled}
+Max recursion: {_state.max_recursion}
+Mnemosyne: {'available' if MNEMOSYNE_AVAILABLE else 'not installed'}"""
 
 
 # ---------------------------------------------------------------------------
