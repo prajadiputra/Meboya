@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import math
 import random
 import re
 import threading
@@ -434,10 +435,13 @@ class MonteCarloEngine:
         n_iterations = max(100, min(n_iterations, 100000))
 
         compiled = []
+        all_variables = set()
         for sc in scenarios:
             name = sc.get("name", "unnamed")
             variables = sc.get("variables", {})
             conditions = sc.get("conditions", [])
+            for var in variables:
+                all_variables.add(var)
 
             cond_fns = []
             for cond in conditions:
@@ -461,14 +465,51 @@ class MonteCarloEngine:
                     wins[sc["name"]] += 1
                     samples[sc["name"]].append(vars_dict)
 
+        # Calculate probabilities, Wilson score CI, and Sensitivity Analysis
         results = {}
         for name in wins:
             wins_count = wins[name]
             prob = wins_count / n_iterations
+            
+            # 95% Confidence Interval (Wilson score interval)
+            z = 1.96
+            denominator = 1 + z**2 / n_iterations
+            centre_adj_val = prob + z**2 / (2 * n_iterations)
+            step = z * math.sqrt((prob * (1 - prob) + z**2 / (4 * n_iterations)) / n_iterations)
+            ci_lower = max(0.0, round((centre_adj_val - step) / denominator, 4))
+            ci_upper = min(1.0, round((centre_adj_val + step) / denominator, 4))
+
+            # Sensitivity Analysis: how much does flipping a variable affect the match rate?
+            sensitivity = {}
+            for sc in compiled:
+                if sc["name"] == name and sc["variables"]:
+                    for var in sc["variables"]:
+                        # Calculate impact: if var is forced True vs False
+                        forced_true_matches = 0
+                        forced_false_matches = 0
+                        test_runs = min(1000, n_iterations)
+                        for _ in range(test_runs):
+                            vars_dict_true = {}
+                            vars_dict_false = {}
+                            for v, p in sc["variables"].items():
+                                val = 1 if rng.random() < p else 0
+                                vars_dict_true[v] = val
+                                vars_dict_false[v] = val
+                            vars_dict_true[var] = 1
+                            vars_dict_false[var] = 0
+                            if all(fn(vars_dict_true) for fn in sc["conditions"]):
+                                forced_true_matches += 1
+                            if all(fn(vars_dict_false) for fn in sc["conditions"]):
+                                forced_false_matches += 1
+                        impact = (forced_true_matches - forced_false_matches) / test_runs
+                        sensitivity[var] = round(impact, 4)
+
             results[name] = {
                 "probability": round(prob, 4),
+                "confidence_interval_95": [ci_lower, ci_upper],
                 "wins": wins_count,
                 "iterations": n_iterations,
+                "sensitivity_impact": sensitivity,
                 "sample_vars": samples[name][:3] if samples[name] else [],
             }
 
@@ -480,8 +521,6 @@ class MonteCarloEngine:
             "total_iterations": n_iterations,
             "confidence": "high" if n_iterations >= 5000 else "medium",
         }
-
-
 # ---------------------------------------------------------------------------
 # Goal Detection
 # ---------------------------------------------------------------------------
@@ -570,6 +609,14 @@ MEDIUM_PROMPT = f"""{GOAL_DETECTION_PROMPT}
 {SELF_VERIFICATION_PROMPT}
 {KNOWLEDGE_BOUNDARY_PROMPT}"""
 
+COUNTERFACTUAL_GUIDANCE = """
+[COUNTERFACTUAL EXPLORER]
+For your final synthesis, consider:
+1. "What if my main assumption is wrong?"
+2. "What are the contingency plans if this fails at 80% completion?"
+3. "Is there a 'kill-switch' or rollback plan?"
+Generate a brief contingency summary if the path has high risk."""
+
 DEEP_PROMPT = f"""{GOAL_DETECTION_PROMPT}
 
 {SCENARIO_PROMPT_TEMPLATE}
@@ -579,7 +626,8 @@ DEEP_PROMPT = f"""{GOAL_DETECTION_PROMPT}
 {REASON_DEEPER_GUIDANCE}
 
 {SELF_VERIFICATION_PROMPT}
-{KNOWLEDGE_BOUNDARY_PROMPT}"""
+{KNOWLEDGE_BOUNDARY_PROMPT}
+{COUNTERFACTUAL_GUIDANCE}"""
 
 
 def build_prompt(depth: int = 3) -> str:
@@ -973,6 +1021,8 @@ def handle_meboya_command(cmd: str) -> str:
         depth = depth_from_complexity(complexity) if _state.auto_depth else _state.depth
         guidance = build_goal_prompt(test_msg, depth=depth, hats_enabled=_state.hats_enabled)
         return f"**Test Injection** (complexity={complexity}, depth={depth}):\n\n{guidance}"
+    elif sub == "health":
+        return _meboya_health_str()
 
     return COMMAND_HELP
 
@@ -987,6 +1037,33 @@ Simulation display: {_state.show_simulation}
 Memory: {_state.memory_enabled}
 Max recursion: {_state.max_recursion}
 Mnemosyne: {'available' if MNEMOSYNE_AVAILABLE else 'not installed'}"""
+
+
+def _meboya_health_str() -> str:
+    """Runtime observability dump."""
+    import time
+    return f"""**Meboya Health Dashboard**
+
+Runtime State:
+  Current depth: {_state.depth}
+  Current user msg: "{_state._current_user_message[:80]}{'...' if len(_state._current_user_message) > 80 else ''}"
+  Active hats: {', '.join(_state._active_hats) if _state._active_hats else 'none'}
+  Recursion depth: {_state._recursion_depth} / {_state.max_recursion}
+  Reasoning stack: {len(_state._reasoning_stack)} frames
+  Stop sent: {_state._stop_sent}
+
+Feature Flags:
+  Auto-depth: {_state.auto_depth}
+  Hats enabled: {_state.hats_enabled}
+  Sim display: {_state.show_simulation}
+  Memory: {_state.memory_enabled}
+
+Memory Backend:
+  Mnemosyne available: {MNEMOSYNE_AVAILABLE}
+
+Engine:
+  MonteCarlo thread-local RNG: {'initialized' if hasattr(_engine._local, 'rng') else 'cold'}
+"""
 
 
 # ---------------------------------------------------------------------------
