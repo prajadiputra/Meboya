@@ -101,20 +101,21 @@ def build_hat_guidance(depth: int = 3) -> str:
         return """
 
 [De Bono Parallel Thinking]
-You may use the Six Thinking Hats framework to structure your reasoning:
-⚪ White = facts/data | 🔴 Red = feelings/intuition | ⚫ Black = risks/caution
-🟡 Yellow = benefits/optimism | 🟢 Green = creativity/alternatives | 🔵 Blue = process/summary
-Apply hats sequentially or in parallel as useful. Mark hat sections with [HAT:color]...[/HAT:color]."""
+Use the Six Thinking Hats to structure your reasoning.
+Mark each section with a simple prefix tag:
+[WHITE] facts/data | [RED] feelings/intuition | [BLACK] risks/caution
+[YELLOW] benefits/optimism | [GREEN] creativity/alternatives | [BLUE] process/summary
+Apply hats as useful. Keep hat sections VISIBLE in your output."""
 
     lines = ["", "[De Bono Parallel Thinking — Structured]"]
-    for i, hat_key in enumerate(HAT_ORDER):
+    for hat_key in HAT_ORDER:
         hat = HATS[hat_key]
-        lines.append(f"\n{hat['emoji']} **{hat['name']}** — {hat['focus']}")
-        lines.append(f"   Use [HAT:{hat_key}]...[/HAT:{hat_key}] to mark sections.")
+        tag = hat_key.upper()
+        lines.append(f"\n[{tag}] {hat['name']} — {hat['focus']}")
 
     lines.append(
-        "\nProcess: Work through hats in order (White → Red → Black → Yellow → Green → Blue). "
-        "Blue Hat synthesizes at the end."
+        "\nProcess: Work through hats in order (WHITE → RED → BLACK → YELLOW → GREEN → BLUE). "
+        "BLUE synthesizes at the end. Keep ALL hat sections VISIBLE in your final output."
     )
     return "\n".join(lines)
 
@@ -629,7 +630,6 @@ def format_response(
         r"\[world_model_guide\].*?\[/world_model_guide\]", "", cleaned, flags=re.DOTALL
     )
     cleaned = re.sub(r"<world_model>.*?</world_model>", "", cleaned, flags=re.DOTALL)
-    cleaned = re.sub(r"\[HAT:\w+\].*?\[/HAT:\w+\]", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = cleaned.strip()
 
     if show_simulation and active_hats:
