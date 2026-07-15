@@ -892,7 +892,7 @@ async def on_pre_llm_call(
 # ---------------------------------------------------------------------------
 
 
-async def on_post_llm_call(
+async def on_transform_llm_output(
     response_text: str = "",
     **_: Any,
 ) -> Optional[str]:
@@ -1110,7 +1110,7 @@ Engine:
 def register(ctx: Any) -> None:
     """Register hooks, tools, and commands with Hermes."""
     ctx.register_hook("pre_llm_call", on_pre_llm_call)
-    ctx.register_hook("post_llm_call", on_post_llm_call)
+    ctx.register_hook("transform_llm_output", on_transform_llm_output)
     ctx.register_hook("post_tool_call", on_post_tool_call)
 
     ctx.register_tool("simulate", "meboya", SIMULATE_SCHEMA, simulate_tool_handler)
