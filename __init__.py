@@ -98,26 +98,31 @@ HAT_ORDER = ["white", "red", "black", "yellow", "green", "blue"]
 
 def build_hat_guidance(depth: int = 3) -> str:
     """Build De Bono hat guidance block for injection."""
+    # Mandatory example the model MUST follow in output
+    _EXAMPLE = """
+MANDATORY OUTPUT FORMAT — You MUST structure your answer like this:
+[WHITE] <facts about the question> [/WHITE]
+[BLACK] <risks, problems, what could fail> [/BLACK]
+[YELLOW] <benefits, optimistic view> [/YELLOW]
+[GREEN] <creative alternatives> [/GREEN]
+[BLUE] <synthesis, conclusion, next step> [/BLUE]"""
+
     if depth <= 2:
-        return """
+        return _EXAMPLE + """
 
-[De Bono Parallel Thinking]
-Use the Six Thinking Hats to structure your reasoning.
-Mark each section with a simple prefix tag:
-[WHITE] facts/data | [RED] feelings/intuition | [BLACK] risks/caution
-[YELLOW] benefits/optimism | [GREEN] creativity/alternatives | [BLUE] process/summary
-Apply hats as useful. Keep hat sections VISIBLE in your output."""
+Each tag is a section of your answer. Do NOT merge sections. Keep each [COLOR]...[/COLOR] visible in your final output."""
 
-    lines = ["", "[De Bono Parallel Thinking — Structured]"]
+    lines = [
+        _EXAMPLE,
+        "\nProcess: Work through hats in order (WHITE → BLACK → YELLOW → GREEN → BLUE).",
+        "BLUE synthesizes at the end. Each section must be visible and clearly tagged.",
+        "\n[Hat Definitions]",
+    ]
     for hat_key in HAT_ORDER:
         hat = HATS[hat_key]
         tag = hat_key.upper()
-        lines.append(f"\n[{tag}] {hat['name']} — {hat['focus']}")
+        lines.append(f"[{tag}] {hat['name']} — {hat['focus']}")
 
-    lines.append(
-        "\nProcess: Work through hats in order (WHITE → RED → BLACK → YELLOW → GREEN → BLUE). "
-        "BLUE synthesizes at the end. Keep ALL hat sections VISIBLE in your final output."
-    )
     return "\n".join(lines)
 
 
@@ -125,7 +130,12 @@ def detect_active_hats(response_text: str) -> List[str]:
     """Detect which hats were used in the response."""
     active = []
     for hat_key in HATS:
-        if re.search(rf"\[HAT:{hat_key}\].*?\[/HAT:{hat_key}\]", response_text, re.DOTALL | re.IGNORECASE):
+        tag = hat_key.upper()
+        # Match both [WHITE] and [/WHITE] presence
+        if re.search(rf"\[{tag}\].*?\[/{tag}\]", response_text, re.DOTALL | re.IGNORECASE):
+            active.append(hat_key)
+        # Also match open-tag only (no closing)
+        elif re.search(rf"\[{tag}\]", response_text, re.IGNORECASE):
             active.append(hat_key)
     return active
 
