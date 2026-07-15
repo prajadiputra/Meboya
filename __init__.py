@@ -933,7 +933,19 @@ def register(ctx: Any) -> None:
     ctx.register_tool("simulate", "meboya", SIMULATE_SCHEMA, simulate_tool_handler)
     ctx.register_tool("reason_deeper", "meboya", REASON_DEEPER_SCHEMA, reason_deeper_tool_handler)
 
-    ctx.register_cli_command("meboya", handle_meboya_command, "Meboya auto-thinking (DOGA parity)")
+    # Slash commands (in-session /meboya, not hermes subcommand)
+    ctx.register_command(
+        "meboya",
+        handle_meboya_command,
+        description="Meboya auto-thinking control",
+        args_hint="on|off|status|depth <1-5>|auto|hats on|off|sim on|off|memory on|off|max-recursion <1-5>|test <message>",
+    )
+    ctx.register_command(
+        "doga",
+        handle_meboya_command,
+        description="Alias for /meboya (DOGA compat)",
+        args_hint="on|off|status",
+    )
 
     logger.info("Meboya plugin registered (DOGA parity + Verification + Boundary)")
 
