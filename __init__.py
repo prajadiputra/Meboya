@@ -98,31 +98,28 @@ HAT_ORDER = ["white", "red", "black", "yellow", "green", "blue"]
 
 def build_hat_guidance(depth: int = 3) -> str:
     """Build De Bono hat guidance block for injection."""
-    # Mandatory example the model MUST follow in output
-    _EXAMPLE = """
-MANDATORY OUTPUT FORMAT — You MUST structure your answer like this:
-[WHITE] <facts about the question> [/WHITE]
-[BLACK] <risks, problems, what could fail> [/BLACK]
-[YELLOW] <benefits, optimistic view> [/YELLOW]
-[GREEN] <creative alternatives> [/GREEN]
-[BLUE] <synthesis, conclusion, next step> [/BLUE]"""
-
     if depth <= 2:
-        return _EXAMPLE + """
-
-Each tag is a section of your answer. Do NOT merge sections. Keep each [COLOR]...[/COLOR] visible in your final output."""
+        return """
+[De Bono Parallel Thinking]
+Structure your answer with prefixed hat tags. Example:
+[WHITE] facts about the question
+[BLACK] risks, problems, what could fail
+[BLUE] synthesis, conclusion, next step
+Keep each hat tag visible in your final output."""
 
     lines = [
-        _EXAMPLE,
-        "\nProcess: Work through hats in order (WHITE → BLACK → YELLOW → GREEN → BLUE).",
-        "BLUE synthesizes at the end. Each section must be visible and clearly tagged.",
-        "\n[Hat Definitions]",
+        "Structure your answer with these hat tags:",
+        "",
+        "[WHITE] Facts, data, information gaps. What do we know? What do we need?",
+        "[RED] Feelings, intuition, hunches. No justification needed.",
+        "[BLACK] Risks, problems, why it might fail. Critical judgment.",
+        "[YELLOW] Benefits, optimism, value. Why it could work.",
+        "[GREEN] Creativity, alternatives, new ideas. Provocation.",
+        "[BLUE] Process, meta-thinking, summary, next steps. Orchestration.",
+        "",
+        "Process: Work through hats in order (WHITE → RED → BLACK → YELLOW → GREEN → BLUE).",
+        "BLUE synthesizes at the end. Keep ALL hat tags visible in your final output.",
     ]
-    for hat_key in HAT_ORDER:
-        hat = HATS[hat_key]
-        tag = hat_key.upper()
-        lines.append(f"[{tag}] {hat['name']} — {hat['focus']}")
-
     return "\n".join(lines)
 
 
@@ -131,11 +128,7 @@ def detect_active_hats(response_text: str) -> List[str]:
     active = []
     for hat_key in HATS:
         tag = hat_key.upper()
-        # Match both [WHITE] and [/WHITE] presence
-        if re.search(rf"\[{tag}\].*?\[/{tag}\]", response_text, re.DOTALL | re.IGNORECASE):
-            active.append(hat_key)
-        # Also match open-tag only (no closing)
-        elif re.search(rf"\[{tag}\]", response_text, re.IGNORECASE):
+        if re.search(rf"\[{tag}\]", response_text, re.IGNORECASE):
             active.append(hat_key)
     return active
 
@@ -1108,18 +1101,8 @@ def register(ctx: Any) -> None:
         description="Meboya auto-thinking control",
         args_hint="on|off|status|depth <1-5>|auto|hats on|off|sim on|off|memory on|off|max-recursion <1-5>|test <message>",
     )
-    ctx.register_command(
-        "doga",
-        handle_meboya_command,
-        description="Alias for /meboya (DOGA compat)",
-        args_hint="on|off|status",
-    )
 
     logger.info("Meboya plugin registered (DOGA parity + Verification + Boundary)")
-
-
-def _register_doga_alias(ctx: Any) -> None:
-    ctx.register_cli_command("doga", handle_meboya_command, "Alias for /meboya (DOGA compat)")
 
 
 __all__ = ["register", "handle_meboya_command", "MNEMOSYNE_AVAILABLE"]
