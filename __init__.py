@@ -969,8 +969,19 @@ COMMAND_HELP = """
 
 def handle_meboya_command(cmd: str) -> str:
     """Parse and execute /meboya slash command."""
-    parts = cmd.strip().split()
-    # cmd passed here is just the args (e.g., "status"), NOT "/meboya status"
+    logger.info("meboya command handler called with: %r", cmd)
+
+    raw = cmd.strip()
+    # Strip command prefix if present (Hermes may pass "/meboya ..." or just "...")
+    for prefix in ("/meboya ", "/doga "):
+        if raw.lower().startswith(prefix):
+            raw = raw[len(prefix):].strip()
+            break
+    # Also strip bare "/meboya" or "/doga" with no args
+    if raw.lower() in ("/meboya", "/doga"):
+        raw = ""
+
+    parts = raw.split()
     if not parts:
         return _meboya_status_str()
 
