@@ -853,9 +853,14 @@ async def on_pre_llm_call(
     if not _state.enabled:
         return None
 
+    # Guard: user_message can be None in cron/internal calls
+    if not user_message or not user_message.strip():
+        return None
+
     _state._current_user_message = user_message
     _state._recursion_depth = 0
     _state._reasoning_stack.clear()
+    _state._tools_called_this_turn = []
 
     if _state.auto_depth:
         complexity = assess_complexity(user_message)
