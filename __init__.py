@@ -890,12 +890,18 @@ async def on_transform_llm_output(
     response_text: str = "",
     **_: Any,
 ) -> Optional[str]:
-    """Format response and save goal pattern to memory."""
+    """Format response, enforce hats if missing, save goal pattern to memory."""
     if not _state.enabled or not response_text:
         return None
 
     active_hats = detect_active_hats(response_text)
     _state._active_hats = active_hats
+
+    # ENFORCE: if query was complex enough but model didn't use hats, auto-wrap
+    if not active_hats and _state.hats_enabled and _state.depth >= 3:
+        response_text = _auto_wrap_hats(response_text)
+        active_hats = detect_active_hats(response_text)
+        _state._active_hats = active_hats
 
     if _state.memory_enabled and MNEMOSYNE_AVAILABLE and _state._current_user_message:
         try:
@@ -933,6 +939,89 @@ async def on_transform_llm_output(
     _state._tools_called_this_turn = []
 
     return formatted if formatted != response_text else None
+
+
+# ---------------------------------------------------------------------------
+# Auto-hat wrapper — enforce hat format on model output when missing
+# ---------------------------------------------------------------------------
+
+_HAT_CONTENT_PATTERNS = {
+    "white": [
+        r"(fakta|fact|data|constraint|requirement|info|parameter|field|value|number|status|current|current state)",
+        r"(terjadi|currently|happening|exists|known|present|available)",
+    ],
+    "black": [
+        r"(risiko|risk|problem|error|fail|crash|broken|bug|issue|threat|danger|warning|caution|pitfall)",
+        r"(bisa terjadi|could fail|might break|downside|drawback|limitation|concern)",
+    ],
+    "yellow": [
+        r"(benefit|advantage|value|profit|gain|success|good|positive|pro|optimal|best case)",
+        r"(berhasil|untung|kelebihan|bagus|menguntungkan|strategis)",
+    ],
+    "green": [
+        r"(alternatif|alternative|option|approach|creative|new idea|solution|different|workaround|hack|pivot)",
+        r"(bisa pakai|could use|alternatively|instead|another way|rekomendasi)",
+    ],
+    "blue": [
+        r"(kesimpulan|conclusion|decision|rekomendasi|recommendation|next step|action plan|summary|final)",
+        r"(seharusnya|should|plan|step|langkah|implementasi|execution)",
+    ],
+    "red": [
+        r"(feeling|intuisi|gut|hunch|sense|rasa|insting|emosi|emotional)",
+    ],
+}
+
+_HAT_LABELS = {
+    "white": "Fakta & Data",
+    "black": "Risiko & Masalah",
+    "yellow": "Nilai & Manfaat",
+    "green": "Alternatif & Kreativitas",
+    "blue": "Kesimpulan & Tindakan",
+    "red": "Intuisi & Perasaan",
+}
+
+
+def _auto_wrap_hats(text: str) -> str:
+    """If model didn't use hat tags, auto-assign hat labels to paragraphs."""
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if len(paragraphs) < 3:
+        return text  # too short to meaningfully wrap
+
+    result_parts = []
+    assigned = set()
+
+    for para in paragraphs:
+        para_lower = para.lower()
+        best_hat = None
+        best_score = 0
+
+        for hat, patterns in _HAT_CONTENT_PATTERNS.items():
+            if hat in assigned:
+                continue
+            score = sum(1 for p in patterns if re.search(p, para_lower))
+            if score > best_score:
+                best_score = score
+                best_hat = hat
+
+        # Fallback: if no pattern matched, assign based on position
+        if not best_hat:
+            remaining = [h for h in ["white", "black", "yellow", "green", "blue"] if h not in assigned]
+            if remaining:
+                if len(result_parts) == 0:
+                    best_hat = remaining[0]  # first paragraph = white/facts
+                elif len(result_parts) >= len(paragraphs) - 1:
+                    best_hat = remaining[-1]  # last = blue/conclusion
+                else:
+                    best_hat = remaining[len(result_parts) % len(remaining)]
+
+        if best_hat:
+            assigned.add(best_hat)
+            label = _HAT_LABELS.get(best_hat, best_hat.upper())
+            result_parts.append(f"[{best_hat.upper()}] {label}\n{para}")
+        else:
+            result_parts.append(para)
+
+    return "\n\n".join(result_parts)
 
 
 # ---------------------------------------------------------------------------
