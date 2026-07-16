@@ -793,7 +793,8 @@ REASON_DEEPER_SCHEMA = {
     "description": (
         "Recursive self-critique tool. After your initial <world_model> analysis, "
         "call this to identify what you missed, challenge assumptions, and refine reasoning. "
-        "Specify a focus area (e.g. 'risk cascade', 'hidden assumptions')."
+        "Specify a focus area (e.g. 'risk cascade', 'hidden assumptions'). "
+        "Include your confidence level — if confident enough (>= 80%), the tool will stop recursion."
     ),
     "parameters": {
         "type": "object",
@@ -806,6 +807,10 @@ REASON_DEEPER_SCHEMA = {
                 "type": "string",
                 "description": "Your current <world_model> reasoning to critique.",
             },
+            "confidence": {
+                "type": "number",
+                "description": "Your confidence level after critique (0.0-1.0). If >= 0.8, recursion stops.",
+            },
         },
         "required": ["focus"],
     },
@@ -813,17 +818,28 @@ REASON_DEEPER_SCHEMA = {
 
 
 async def reason_deeper_tool_handler(args: Dict[str, Any]) -> str:
-    """Handler for the reason_deeper tool."""
+    """Handler for reason_deeper tool — stops if confidence high enough."""
     focus = args.get("focus", "")
     current = args.get("current_reasoning", "")
+    confidence = float(args.get("confidence", 0.5))
 
     _state._recursion_depth += 1
     _state._reasoning_stack.append(
-        {"level": _state._recursion_depth, "focus": focus, "reasoning": current[:500]}
+        {"level": _state._recursion_depth, "focus": focus, "reasoning": current[:500], "confidence": confidence}
     )
+
+    # Auto-stop if confidence >= 0.8 or max recursion reached
+    if confidence >= 0.8 or _state._recursion_depth >= _state.max_recursion:
+        return json.dumps({
+            "stop": True,
+            "reason": f"Confidence {confidence:.0%} >= 80% — sufficient" if confidence >= 0.8 else f"Max recursion depth ({_state.max_recursion}) reached",
+            "confidence": confidence,
+            "recursion_level": _state._recursion_depth,
+        })
 
     critique = f"""[REASON_DEEPER — Level {_state._recursion_depth}/{_state.max_recursion}]
 Focus: {focus}
+Confidence so far: {confidence:.0%}
 
 Your previous reasoning:
 {current}
@@ -834,7 +850,8 @@ Now critically examine:
 3. What would change your conclusion?
 4. Are there second-order effects?
 
-Return refined <world_model> analysis."""
+Return refined <world_model> analysis.
+After refining, call `reason_deeper` again with updated confidence, or produce your final answer if confident (>= 80%)."""
 
     return critique
 
@@ -925,6 +942,24 @@ async def on_transform_llm_output(
                     source="meboya_goal",
                     metadata={"goal_type": goal_type, "depth": _state.depth},
                 )
+
+            # Structured decision log (priority 9 from upgrade spec)
+            # Save: {query, hats, depth, tools, recursion, decision_hat, timestamp}
+            decision_record = {
+                "ts": __import__("datetime").datetime.now().isoformat(),
+                "query": _state._current_user_message[:300],
+                "depth": _state.depth,
+                "hats": [h.upper() for h in active_hats],
+                "tools": _state._tools_called_this_turn,
+                "recursion_levels": _state._recursion_depth,
+                "decision_hat": active_hats[-1].upper() if active_hats else "NONE",
+            }
+            remember(
+                content=f"[DECISION] q={decision_record['query'][:120]} | d={decision_record['depth']} | hats={'/'.join(decision_record['hats'])} | final={decision_record['decision_hat']}",
+                importance=0.85,
+                source="meboya_decision",
+                metadata=decision_record,
+            )
         except Exception:
             logger.debug("meboya memory save failed", exc_info=True)
 
