@@ -98,18 +98,31 @@ HAT_ORDER = ["white", "red", "black", "yellow", "green", "blue"]
 
 def build_hat_guidance(depth: int = 3) -> str:
     """Build De Bono hat guidance block for injection."""
-    # Short, direct instruction — no walls of text
-    if depth <= 2:
-        return "\nStructure your answer using hat prefixes:\n[WHITE] facts\n[BLACK] risks\n[BLUE] conclusion"
+    # 1-shot example dramatically improves model compliance (>40%)
+    ONESHOT = """
 
-    return """
+**Example output format (MUST follow this structure):**
+[WHITE] Cloudflare Gateway API requires API token with Account:Gateway:Read scope. Endpoint: GET /client/v4/gateway/
+[BLACK] Token can expire silently. Rate limits at 1200 req/min.
+[YELLOW] Direct API check gives real-time status, not stale cache.
+[GREEN] Alternative: cloudflared tunnel health check or curl directly.
+[BLUE] Recommended: curl with token from BWS → parse response → return status."""
+
+    if depth <= 2:
+        return f"""
+Structure your answer using hat prefixes:
+[WHITE] facts
+[BLACK] risks
+[BLUE] conclusion{ONESHOT}"""
+
+    return f"""
 Structure your answer using these hat prefixes:
 [WHITE] Facts, data, constraints
 [RED] Intuition, gut feeling
 [BLACK] Risks, failure modes
 [YELLOW] Benefits, value
 [GREEN] Alternatives, creative options
-[BLUE] Synthesis, decision, next step"""
+[BLUE] Synthesis, decision, next step{ONESHOT}"""
 
 
 def detect_active_hats(response_text: str) -> List[str]:
@@ -590,16 +603,16 @@ If a search fails or no tool is available, you MUST explicitly state inside your
 `[KNOWLEDGE GAP: Reason why you cannot verify]`
 """
 
-LIGHT_PROMPT = f"{GOAL_DETECTION_PROMPT}\n{KNOWLEDGE_BOUNDARY_PROMPT}"
+LIGHT_PROMPT = f"{KNOWLEDGE_BOUNDARY_PROMPT}\n{GOAL_DETECTION_PROMPT}"
 
-MEDIUM_PROMPT = f"""{GOAL_DETECTION_PROMPT}
+MEDIUM_PROMPT = f"""{KNOWLEDGE_BOUNDARY_PROMPT}
+{GOAL_DETECTION_PROMPT}
 
 {SCENARIO_PROMPT_TEMPLATE}
 
 {REASON_DEEPER_GUIDANCE}
 
-{SELF_VERIFICATION_PROMPT}
-{KNOWLEDGE_BOUNDARY_PROMPT}"""
+{SELF_VERIFICATION_PROMPT}"""
 
 COUNTERFACTUAL_GUIDANCE = """
 [COUNTERFACTUAL EXPLORER]
@@ -609,7 +622,8 @@ For your final synthesis, consider:
 3. "Is there a 'kill-switch' or rollback plan?"
 Generate a brief contingency summary if the path has high risk."""
 
-DEEP_PROMPT = f"""{GOAL_DETECTION_PROMPT}
+DEEP_PROMPT = f"""{KNOWLEDGE_BOUNDARY_PROMPT}
+{GOAL_DETECTION_PROMPT}
 
 {SCENARIO_PROMPT_TEMPLATE}
 
@@ -618,7 +632,7 @@ DEEP_PROMPT = f"""{GOAL_DETECTION_PROMPT}
 {REASON_DEEPER_GUIDANCE}
 
 {SELF_VERIFICATION_PROMPT}
-{KNOWLEDGE_BOUNDARY_PROMPT}
+
 {COUNTERFACTUAL_GUIDANCE}"""
 
 
@@ -648,6 +662,10 @@ def build_goal_prompt(
         for p in past_patterns:
             lines.append(f"- Goal: {p.get('goal_type', '?')} (used {p.get('count', 1)}x)")
         prompt += "\n" + "\n".join(lines)
+
+    # Hats at the very END — recency effect: model remembers last instruction
+    if hats_enabled:
+        prompt += build_hat_guidance(depth)
 
     return f"\n\n[meboya_guide]\n{prompt}\n[/meboya_guide]"
 
