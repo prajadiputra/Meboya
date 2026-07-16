@@ -23,26 +23,16 @@ logger = logging.getLogger("meboya")
 MNEMOSYNE_AVAILABLE = False
 _mnemosyne = None
 
-# Try newer API path first (mnemosyne-memory 3.12+)
+# Try legacy Mnemosyne class first (stable across versions)
 try:
-    from mnemosyne.core.memory import MemoryStream
+    from mnemosyne import Mnemosyne
 
-    _mnemosyne = None
-    del MemoryStream
+    _mnemosyne = Mnemosyne()
+    MNEMOSYNE_AVAILABLE = True
 except ImportError:
-    pass
-
-# Fall back to legacy Mnemosyne class (3.7–3.11)
-if not MNEMOSYNE_AVAILABLE:
-    try:
-        from mnemosyne import Mnemosyne
-
-        _mnemosyne = Mnemosyne()
-        MNEMOSYNE_AVAILABLE = True
-    except ImportError:
-        logger.debug("mnemosyne not installed — graceful fallback")
-    except Exception as e:
-        logger.warning("mnemosyne init failed: %s", e)
+    logger.debug("mnemosyne not installed — graceful fallback")
+except Exception as e:
+    logger.warning("mnemosyne init failed: %s", e)
 
 
 def remember(**kwargs: Any) -> None:
@@ -98,25 +88,18 @@ HAT_ORDER = ["white", "red", "black", "yellow", "green", "blue"]
 
 def build_hat_guidance(depth: int = 3) -> str:
     """Build De Bono hat guidance block for injection."""
-    # 1-shot example dramatically improves model compliance (>40%)
+    # 1-shot example dramatically improves model compliance
     ONESHOT = """
 
 **Example output format (MUST follow this structure):**
-[WHITE] Cloudflare Gateway API requires API token with Account:Gateway:Read scope. Endpoint: GET /client/v4/gateway/
-[BLACK] Token can expire silently. Rate limits at 1200 req/min.
-[YELLOW] Direct API check gives real-time status, not stale cache.
-[GREEN] Alternative: cloudflared tunnel health check or curl directly.
-[BLUE] Recommended: curl with token from BWS → parse response → return status."""
+[WHITE] Cloudflare Gateway API requires API token with Account:Gateway:Read scope.
+[RED] I feel confident this is the correct configuration.
+[BLACK] Token can expire silently. Rate limits exist.
+[YELLOW] Direct API check gives real-time status.
+[GREEN] Alternative: cloudflared tunnel health check.
+[BLUE] Recommended: curl with token from BWS → parse response."""
 
-    if depth <= 2:
-        return f"""
-Structure your answer using hat prefixes:
-[WHITE] facts
-[BLACK] risks
-[BLUE] conclusion{ONESHOT}"""
-
-    return f"""
-Structure your answer using these hat prefixes:
+    return f"""Structure your answer using these hat prefixes:
 [WHITE] Facts, data, constraints
 [RED] Intuition, gut feeling
 [BLACK] Risks, failure modes
@@ -702,7 +685,7 @@ def format_response(
 class PluginState:
     enabled: bool = True
     show_simulation: bool = True
-    memory_enabled: bool = MNEMOSYNE_AVAILABLE
+    memory_enabled: bool = True
     auto_depth: bool = True
     depth: int = 3
     max_recursion: int = 3
@@ -775,7 +758,7 @@ SIMULATE_SCHEMA = {
 }
 
 
-async def simulate_tool_handler(args: Dict[str, Any]) -> str:
+def simulate_tool_handler(args: Dict[str, Any]) -> str:
     """Handler for the simulate tool."""
     scenarios = args.get("scenarios", [])
     n_iterations = args.get("n_iterations", 10000)
@@ -817,7 +800,7 @@ REASON_DEEPER_SCHEMA = {
 }
 
 
-async def reason_deeper_tool_handler(args: Dict[str, Any]) -> str:
+def reason_deeper_tool_handler(args: Dict[str, Any]) -> str:
     """Handler for reason_deeper tool — stops if confidence high enough."""
     focus = args.get("focus", "")
     current = args.get("current_reasoning", "")
@@ -861,7 +844,7 @@ After refining, call `reason_deeper` again with updated confidence, or produce y
 # ---------------------------------------------------------------------------
 
 
-async def on_pre_llm_call(
+def on_pre_llm_call(
     user_message: str = "",
     conversation_history: Optional[List] = None,
     session_id: str = "",
@@ -915,11 +898,12 @@ async def on_pre_llm_call(
 # ---------------------------------------------------------------------------
 
 
-async def on_transform_llm_output(
+def on_transform_llm_output(
     response_text: str = "",
     **_: Any,
 ) -> Optional[str]:
     """Format response, enforce hats if missing, save goal pattern to memory."""
+
     if not _state.enabled or not response_text:
         return None
 
@@ -927,7 +911,7 @@ async def on_transform_llm_output(
     _state._active_hats = active_hats
 
     # ENFORCE: if query was complex enough but model didn't use hats, auto-wrap
-    if not active_hats and _state.hats_enabled and _state.depth >= 3:
+    if not active_hats and _state.hats_enabled:
         response_text = _auto_wrap_hats(response_text)
         active_hats = detect_active_hats(response_text)
         _state._active_hats = active_hats
@@ -969,24 +953,28 @@ async def on_transform_llm_output(
         active_hats=active_hats,
     )
 
-    # Append decision trace when hats are present
-    if _state.show_simulation and active_hats:
+    # Append decision trace when simulation display enabled
+    if _state.show_simulation:
         trace_parts = []
         trace_parts.append(f"📊 **Meboya Decision Trace**")
-        trace_parts.append(f"Depth: {_state.depth} | Hats: {len(active_hats)}/6")
-        trace_parts.append(f"Hats: {' → '.join(h.upper() for h in active_hats)}")
+        trace_parts.append(f"Depth: {_state.depth}")
+        if active_hats:
+            trace_parts.append(f"Hats: {len(active_hats)}/6 — {' → '.join(h.upper() for h in active_hats)}")
 
-        # Determine which hat is the conclusion/decision
-        last_hat = active_hats[-1].upper()
-        hat_meaning = {
-            "WHITE": "Fakta & Data",
-            "BLACK": "Risiko & Masalah",
-            "YELLOW": "Nilai & Manfaat",
-            "GREEN": "Alternatif & Kreativitas",
-            "BLUE": "Kesimpulan & Tindakan",
-            "RED": "Intuisi & Perasaan",
-        }
-        trace_parts.append(f"**Final decision hat: [{last_hat}]** ({hat_meaning.get(last_hat, '?')})")
+        if active_hats:
+            # Determine which hat is the conclusion/decision
+            last_hat = active_hats[-1].upper()
+            hat_meaning = {
+                "WHITE": "Fakta & Data",
+                "BLACK": "Risiko & Masalah",
+                "YELLOW": "Nilai & Manfaat",
+                "GREEN": "Alternatif & Kreativitas",
+                "BLUE": "Kesimpulan & Tindakan",
+                "RED": "Intuisi & Perasaan",
+            }
+            trace_parts.append(f"**Final decision hat: [{last_hat}]** ({hat_meaning.get(last_hat, '?')})")
+        else:
+            trace_parts.append("**Hats: auto-gagal (model terlalu singkat)**")
 
         if _state._tools_called_this_turn:
             trace_parts.append(f"Tools: {', '.join(_state._tools_called_this_turn)}")
@@ -1043,8 +1031,19 @@ _HAT_LABELS = {
 def _auto_wrap_hats(text: str) -> str:
     """If model didn't use hat tags, auto-assign hat labels to paragraphs."""
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if not paragraphs:
+        return text
+
+    # Short responses (1-2 paragraphs): assign WHITE (facts) + BLUE (conclusion) minimally
     if len(paragraphs) < 3:
-        return text  # too short to meaningfully wrap
+        hats_for_short = {1: ["white"], 2: ["white", "blue"]}
+        use_hats = hats_for_short.get(len(paragraphs), ["white"])
+        result_parts = []
+        for i, para in enumerate(paragraphs):
+            hat = use_hats[i] if i < len(use_hats) else "blue"
+            label = _HAT_LABELS.get(hat, hat.upper())
+            result_parts.append(f"[{hat.upper()}] {label}\n{para}")
+        return "\n\n".join(result_parts)
 
     result_parts = []
     assigned = set()
@@ -1088,7 +1087,7 @@ def _auto_wrap_hats(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def on_post_tool_call(
+def on_post_tool_call(
     tool_name: str = "",
     args: Optional[Dict[str, Any]] = None,
     result: Any = None,
