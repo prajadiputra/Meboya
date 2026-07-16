@@ -98,29 +98,18 @@ HAT_ORDER = ["white", "red", "black", "yellow", "green", "blue"]
 
 def build_hat_guidance(depth: int = 3) -> str:
     """Build De Bono hat guidance block for injection."""
+    # Short, direct instruction — no walls of text
     if depth <= 2:
-        return """
-[De Bono Parallel Thinking]
-Structure your answer with prefixed hat tags. Example:
-[WHITE] facts about the question
-[BLACK] risks, problems, what could fail
-[BLUE] synthesis, conclusion, next step
-Keep each hat tag visible in your final output."""
+        return "\nStructure your answer using hat prefixes:\n[WHITE] facts\n[BLACK] risks\n[BLUE] conclusion"
 
-    lines = [
-        "Structure your answer with these hat tags:",
-        "",
-        "[WHITE] Facts, data, information gaps. What do we know? What do we need?",
-        "[RED] Feelings, intuition, hunches. No justification needed.",
-        "[BLACK] Risks, problems, why it might fail. Critical judgment.",
-        "[YELLOW] Benefits, optimism, value. Why it could work.",
-        "[GREEN] Creativity, alternatives, new ideas. Provocation.",
-        "[BLUE] Process, meta-thinking, summary, next steps. Orchestration.",
-        "",
-        "Process: Work through hats in order (WHITE → RED → BLACK → YELLOW → GREEN → BLUE).",
-        "BLUE synthesizes at the end. Keep ALL hat tags visible in your final output.",
-    ]
-    return "\n".join(lines)
+    return """
+Structure your answer using these hat prefixes:
+[WHITE] Facts, data, constraints
+[RED] Intuition, gut feeling
+[BLACK] Risks, failure modes
+[YELLOW] Benefits, value
+[GREEN] Alternatives, creative options
+[BLUE] Synthesis, decision, next step"""
 
 
 def detect_active_hats(response_text: str) -> List[str]:
