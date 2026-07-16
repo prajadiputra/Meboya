@@ -672,12 +672,6 @@ def format_response(
     cleaned = re.sub(r"<world_model>.*?</world_model>", "", cleaned, flags=re.DOTALL)
     cleaned = cleaned.strip()
 
-    if show_simulation and active_hats:
-        hat_summary = "\n\n---\n**Thinking Hats Used:** " + " → ".join(
-            f"{HATS[h]['emoji']} {HATS[h]['name']}" for h in active_hats if h in HATS
-        )
-        cleaned += hat_summary
-
     return cleaned
 
 
@@ -922,18 +916,30 @@ async def on_transform_llm_output(
         active_hats=active_hats,
     )
 
-    # Append decision trace if hats were used or tools were called
-    if _state.show_simulation and (active_hats or _state._tools_called_this_turn):
+    # Append decision trace when hats are present
+    if _state.show_simulation and active_hats:
         trace_parts = []
         trace_parts.append(f"📊 **Meboya Decision Trace**")
-        trace_parts.append(f"Depth: {_state.depth} | Hats: {len(active_hats)}/6 | Tools: {len(_state._tools_called_this_turn)}")
-        if active_hats:
-            trace_parts.append(f"Hats used: {' → '.join(h.upper() for h in active_hats)}")
+        trace_parts.append(f"Depth: {_state.depth} | Hats: {len(active_hats)}/6")
+        trace_parts.append(f"Hats: {' → '.join(h.upper() for h in active_hats)}")
+
+        # Determine which hat is the conclusion/decision
+        last_hat = active_hats[-1].upper()
+        hat_meaning = {
+            "WHITE": "Fakta & Data",
+            "BLACK": "Risiko & Masalah",
+            "YELLOW": "Nilai & Manfaat",
+            "GREEN": "Alternatif & Kreativitas",
+            "BLUE": "Kesimpulan & Tindakan",
+            "RED": "Intuisi & Perasaan",
+        }
+        trace_parts.append(f"**Final decision hat: [{last_hat}]** ({hat_meaning.get(last_hat, '?')})")
+
         if _state._tools_called_this_turn:
-            trace_parts.append(f"Tools called: {', '.join(_state._tools_called_this_turn)}")
+            trace_parts.append(f"Tools: {', '.join(_state._tools_called_this_turn)}")
         if _state._recursion_depth > 0:
             trace_parts.append(f"Reasoning levels: {_state._recursion_depth}")
-        formatted += "\n\n" + "\n".join(trace_parts)
+        formatted += "\n\n---\n" + "\n".join(trace_parts)
 
     # Reset per-turn state
     _state._tools_called_this_turn = []
