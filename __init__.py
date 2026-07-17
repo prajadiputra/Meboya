@@ -664,12 +664,11 @@ def format_response(
     active_hats: Optional[List[str]] = None,
 ) -> str:
     """Format response: strip guide blocks, optionally append hat summary."""
-    cleaned = re.sub(
-        r"\[meboya_guide\].*?\[/meboya_guide\]", "", response_text, flags=re.DOTALL
-    )
-    cleaned = re.sub(
-        r"\[world_model_guide\].*?\[/world_model_guide\]", "", cleaned, flags=re.DOTALL
-    )
+    # Strip all meboya_guide blocks (model may echo injected prompt back)
+    cleaned = re.sub(r"\[meboya_guide\].*?\[/meboya_guide\]", "", response_text, flags=re.DOTALL)
+    # Also strip any unclosed/orphaned meboya_guide tags
+    cleaned = re.sub(r"\[/?meboya_guide\]", "", cleaned)
+    cleaned = re.sub(r"\[/?world_model_guide\]", "", cleaned)
     cleaned = re.sub(r"<world_model>.*?</world_model>", "", cleaned, flags=re.DOTALL)
     cleaned = cleaned.strip()
 
