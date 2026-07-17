@@ -923,7 +923,7 @@ def on_transform_llm_output(
                 remember(
                     content=_state._current_user_message,
                     importance=0.7,
-                    source="meboya_goal",
+                    source="meboya",
                     metadata={"goal_type": goal_type, "depth": _state.depth},
                 )
 
@@ -941,7 +941,7 @@ def on_transform_llm_output(
             remember(
                 content=f"[DECISION] q={decision_record['query'][:120]} | d={decision_record['depth']} | hats={'/'.join(decision_record['hats'])} | final={decision_record['decision_hat']}",
                 importance=0.85,
-                source="meboya_decision",
+                source="meboya",
                 metadata=decision_record,
             )
         except Exception:
@@ -953,7 +953,7 @@ def on_transform_llm_output(
         active_hats=active_hats,
     )
 
-    # Append decision trace when simulation display enabled
+    # Prepend decision trace to top
     if _state.show_simulation:
         trace_parts = []
         trace_parts.append(f"📊 **Meboya Decision Trace**")
@@ -962,15 +962,10 @@ def on_transform_llm_output(
             trace_parts.append(f"Hats: {len(active_hats)}/6 — {' → '.join(h.upper() for h in active_hats)}")
 
         if active_hats:
-            # Determine which hat is the conclusion/decision
             last_hat = active_hats[-1].upper()
             hat_meaning = {
-                "WHITE": "Fakta & Data",
-                "BLACK": "Risiko & Masalah",
-                "YELLOW": "Nilai & Manfaat",
-                "GREEN": "Alternatif & Kreativitas",
-                "BLUE": "Kesimpulan & Tindakan",
-                "RED": "Intuisi & Perasaan",
+                "WHITE": "Fakta & Data", "BLACK": "Risiko & Masalah", "YELLOW": "Nilai & Manfaat",
+                "GREEN": "Alternatif & Kreativitas", "BLUE": "Kesimpulan & Tindakan", "RED": "Intuisi & Perasaan",
             }
             trace_parts.append(f"**Final decision hat: [{last_hat}]** ({hat_meaning.get(last_hat, '?')})")
         else:
@@ -980,7 +975,7 @@ def on_transform_llm_output(
             trace_parts.append(f"Tools: {', '.join(_state._tools_called_this_turn)}")
         if _state._recursion_depth > 0:
             trace_parts.append(f"Reasoning levels: {_state._recursion_depth}")
-        formatted += "\n\n---\n" + "\n".join(trace_parts)
+        formatted = "\n".join(trace_parts) + "\n\n---\n\n" + formatted
 
     # Reset per-turn state
     _state._tools_called_this_turn = []
