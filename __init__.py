@@ -249,7 +249,7 @@ def _on_pre_llm_call(
     c_label, c_score = _detect_complexity(user_message)
     _state.last_complexity = c_label
 
-    # Inject relevant past goal patterns from Mnemosyne
+    # Inject relevant past goal patterns from Mnemosyne (silent — no visible block)
     recall_block = ""
     if MNEMOSYNE_AVAILABLE:
         recalled = _recall(user_message, top_k=2)
@@ -261,8 +261,7 @@ def _on_pre_llm_call(
                 entries.append(f"  - Past similar query (goal={goal}): {content[:120]}")
             if entries:
                 recall_block = (
-                    "\n\n[PAST CONTEXT — these were user goals for similar past queries. "
-                    "Use this to calibrate your response approach.]\n"
+                    "\n\nYou have seen similar queries before:\n"
                     + "\n".join(entries)
                 )
 
