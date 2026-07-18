@@ -114,22 +114,22 @@ GOAL_DETECTION = """Before answering, briefly identify what the user's primary n
 
 Choose the dominant goal and let it shape your response."""
 
-HATS_PROMPT = """Evaluate the situation through these parallel lenses:
-  [WHITE] What are the objective facts, data, and constraints?
-  [BLACK] What could go wrong? Risks, edge cases, pitfalls.
-  [YELLOW] What are the upsides, opportunities, or value?
-  [GREEN] What alternative approaches exist? Creative options.
-  [BLUE] Synthesize the above — produce a clear conclusion.
+HATS_PROMPT = """Structure your answer with mandatory hat tags for each section.
 
-Apply each lens in order. Never mix lenses in one section.
+Use `<world_model>` for internal reasoning, then output your answer with:
 
-**MANDATORY: Prefix each section of your response with the corresponding hat tag.**
-Format each paragraph as:
-[WHITE] Your facts and data here...
-[BLACK] Your risks and concerns here...
-[YELLOW] Your benefits and value here...
-[GREEN] Your alternatives and creative options here...
-[BLUE] Your synthesis and conclusion here..."""
+[WHITE] Facts, data, constraints
+[BLACK] Risks, edge cases, pitfalls
+[YELLOW] Benefits, opportunities, value
+[GREEN] Alternatives, creative options
+[BLUE] Synthesis, decision, next steps
+
+**Example output format:**
+[WHITE] The request involves migrating from shared state Redis/SQL to EDA in EKS. Key factors: high-concurrency environment, existing Redis/SQL bottleneck.
+[BLACK] Eventual consistency introduces complexity. Rollback strategy must be redesigned. Consumer lag in high-concurrency can cause data staleness.
+[YELLOW] Decoupling enables independent scaling per service. NATS/Kafka throughput exceeds shared DB by 10-100x.
+[GREEN] Alternative: keep Redis for caching + SQL for events with Debezium CDC as stepping stone before full EDA.
+[BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang."""
 
 # Critical mode — optional analytical enrichment
 CRITICAL_HATS_PROMPT = """Evaluate the situation through these parallel lenses:
