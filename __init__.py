@@ -1,521 +1,111 @@
-"""
-Meboya — Auto-thinking plugin with De Bono Six Hats + Monte Carlo reasoning + Goal detection.
-Upgraded with Self-Verification (Logical checks) and Knowledge Boundary (Hallucination detection).
+"""Meboya — Balinese for "questioning everything".
+
+An auto-thinking plugin for Hermes Agent that injects structured prompts
+(Goal Detection + Six Thinking Hats) before each LLM call, with optional
+Mnemosyne memory recall and write. Zero hard dependencies.
+
+Hooks:
+  pre_llm_call            → recall past goal patterns + inject guide
+  transform_llm_output    → strip markers + write goal to memory
+
+Compatible with Hermes Agent. Falls back gracefully if Mnemosyne is missing.
 """
 
 from __future__ import annotations
 
-import ast
-import json
 import logging
-import math
-import random
 import re
-import threading
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger("meboya")
+logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Mnemosyne graceful fallback (two import paths)
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────
+# Optional Mnemosyne (silent fallback if missing)
+# ──────────────────────────────────────────────────────────────────────
+
 MNEMOSYNE_AVAILABLE = False
 _mnemosyne = None
 
-# Try legacy Mnemosyne class first (stable across versions)
+# Try newer API path first (mnemosyne-memory 3.12+)
 try:
-    from mnemosyne import Mnemosyne
-
-    _mnemosyne = Mnemosyne()
-    MNEMOSYNE_AVAILABLE = True
+    from mnemosyne.core.memory import MemoryStream  # noqa: F401
+    _mnemosyne = None
+    del MemoryStream
 except ImportError:
-    logger.debug("mnemosyne not installed — graceful fallback")
-except Exception as e:
-    logger.warning("mnemosyne init failed: %s", e)
+    pass
 
-
-def remember(**kwargs: Any) -> None:
-    if MNEMOSYNE_AVAILABLE and _mnemosyne:
-        _mnemosyne.remember(**kwargs)
-
-
-def recall(query: str, **kwargs: Any) -> List[Dict[str, Any]]:
-    if MNEMOSYNE_AVAILABLE and _mnemosyne:
-        return _mnemosyne.recall(query=query, **kwargs)
-    return []
-
-
-# ---------------------------------------------------------------------------
-# De Bono Six Thinking Hats
-# ---------------------------------------------------------------------------
-
-HATS = {
-    "white": {
-        "name": "White Hat",
-        "emoji": "⚪",
-        "focus": "Facts, data, information gaps. What do we know? What do we need?",
-    },
-    "red": {
-        "name": "Red Hat",
-        "emoji": "🔴",
-        "focus": "Feelings, intuition, hunches. No justification needed.",
-    },
-    "black": {
-        "name": "Black Hat",
-        "emoji": "⚫",
-        "focus": "Risks, problems, why it might fail. Critical judgment.",
-    },
-    "yellow": {
-        "name": "Yellow Hat",
-        "emoji": "🟡",
-        "focus": "Benefits, optimism, value. Why it could work.",
-    },
-    "green": {
-        "name": "Green Hat",
-        "emoji": "🟢",
-        "focus": "Creativity, alternatives, new ideas. Provocation.",
-    },
-    "blue": {
-        "name": "Blue Hat",
-        "emoji": "🔵",
-        "focus": "Process, meta-thinking, summary, next steps. Orchestration.",
-    },
-}
-
-HAT_ORDER = ["white", "red", "black", "yellow", "green", "blue"]
-
-
-def build_hat_guidance(depth: int = 3) -> str:
-    """Build De Bono hat guidance block for injection."""
-    # 1-shot example dramatically improves model compliance
-    ONESHOT = """
-
-**Example output format (MUST follow this structure):**
-[WHITE] Cloudflare Gateway API requires API token with Account:Gateway:Read scope.
-[RED] I feel confident this is the correct configuration.
-[BLACK] Token can expire silently. Rate limits exist.
-[YELLOW] Direct API check gives real-time status.
-[GREEN] Alternative: cloudflared tunnel health check.
-[BLUE] Recommended: curl with token from BWS → parse response."""
-
-    return f"""Structure your answer using these hat prefixes:
-[WHITE] Facts, data, constraints
-[RED] Intuition, gut feeling
-[BLACK] Risks, failure modes
-[YELLOW] Benefits, value
-[GREEN] Alternatives, creative options
-[BLUE] Synthesis, decision, next step{ONESHOT}"""
-
-
-def detect_active_hats(response_text: str) -> List[str]:
-    """Detect which hats were used in the response."""
-    active = []
-    for hat_key in HATS:
-        tag = hat_key.upper()
-        if re.search(rf"\[{tag}\]", response_text, re.IGNORECASE):
-            active.append(hat_key)
-    return active
-
-
-# ---------------------------------------------------------------------------
-# Auto-Depth Complexity Selector (pure Python, 0 LLM tokens)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ComplexityFeatures:
-    length: int = 0
-    question_marks: int = 0
-    code_blocks: int = 0
-    technical_terms: int = 0
-    conditional_keywords: int = 0
-    multi_part: int = 0
-
-
-TECH_TERMS = {
-    # Infra & networking
-    "cloudflare",
-    "gateway",
-    "ingress",
-    "dns",
-    "cdn",
-    "load balancer",
-    "load-balancer",
-    "lb",
-    "reverse proxy",
-    "tls",
-    "ssl",
-    "cert",
-    "cname",
-    "a record",
-    "txt record",
-    "mx record",
-    # Servers & cloud
-    "server",
-    "deploy",
-    "deployment",
-    "cluster",
-    "instance",
-    "vm",
-    "vps",
-    "hosting",
-    "domain",
-    # Cloudflare-specific
-    "tunnel",
-    "cloudflared",
-    "warp",
-    "workers",
-    "pages",
-    "r2",
-    "d1",
-    "kv",
-    "zone",
-    "dns_record",
-    "waf rule",
-    "rate limit",
-    # Status / live queries (auto-promote to medium)
-    "status",
-    "current",
-    "saat ini",
-    "live",
-    "real-time",
-    "realtime",
-    "now",
-    "check",
-    "cek",
-    "monitoring",
-    "monitor",
-    "alert",
-    "incident",
-    "downtime",
-    "outage",
-    "uptime",
-    "health check",
-    # Original technical terms below
-    "kubernetes",
-    "docker",
-    "aws",
-    "terraform",
-    "ansible",
-    "python",
-    "javascript",
-    "typescript",
-    "api",
-    "database",
-    "sql",
-    "redis",
-    "kafka",
-    "microservice",
-    "distributed",
-    "concurrency",
-    "deadlock",
-    "race condition",
-    "memory leak",
-    "optimization",
-    "latency",
-    "throughput",
-    "scalability",
-    "architecture",
-    "design pattern",
-    "refactor",
-    "debug",
-    "profiling",
-    "benchmark",
-    "regression",
-    "ci/cd",
-    "pipeline",
-    "monitoring",
-    "observability",
-    "tracing",
-    "logging",
-    "alerting",
-    "slo",
-    "sli",
-    "error budget",
-    "postmortem",
-    "root cause",
-    "capacity planning",
-    "cost optimization",
-    "security",
-    "vulnerability",
-    "compliance",
-    "encryption",
-    "authentication",
-    "authorization",
-    "oauth",
-    "jwt",
-    "rbac",
-    "abac",
-    "zero trust",
-    "network policy",
-    "service mesh",
-    "istio",
-    "linkerd",
-    "envoy",
-    "grpc",
-    "rest",
-    "graphql",
-    "websocket",
-    "message queue",
-    "event driven",
-    "saga",
-    "cqrs",
-    "event sourcing",
-}
-
-CONDITIONAL_KEYWORDS = {
-    "if",
-    "else",
-    "elif",
-    "unless",
-    "when",
-    "depends",
-    "conditional",
-    "scenario",
-    "case",
-    "option",
-    "alternative",
-    "tradeoff",
-    "pros and cons",
-    "compare",
-    "versus",
-    "vs",
-    "either",
-    "or",
-    "maybe",
-    "perhaps",
-    "might",
-    "could",
-    "would",
-    "should",
-    "weigh",
-    "balance",
-    "decide",
-    "choose",
-    "select",
-    "evaluate",
-    "assess",
-}
-
-
-def assess_complexity(text: str) -> str:
-    """Return 'low' | 'medium' | 'high' — pure Python heuristic."""
-    if not isinstance(text, str) or not text.strip():
-        return "low"
-
-    features = ComplexityFeatures()
-    features.length = len(text)
-    features.question_marks = text.count("?")
-    features.code_blocks = text.count("```")
-    features.multi_part = max(1, text.count("?") + text.count(";") // 2)
-
-    lower = text.lower()
-    features.technical_terms = sum(1 for term in TECH_TERMS if term in lower)
-    features.conditional_keywords = sum(1 for kw in CONDITIONAL_KEYWORDS if kw in lower)
-
-    # Scoring (tuned for infra/technical)
-    score = 0
-    score += min(features.length // 80, 8)  # Lebih sensitif
-    score += min(features.question_marks * 2, 5)
-    score += min(features.code_blocks * 3, 6)
-    score += min(features.technical_terms * 3, 12)  # Term bobot tinggi
-    score += min(features.conditional_keywords * 1.5, 6)
-    score += min(features.multi_part * 2, 5)
-
-    # Auto-promote: any technical term → minimum medium
-    if features.technical_terms >= 1:
-        score = max(score, 8)
-    # 2+ tech terms → minimum high
-    if features.technical_terms >= 2:
-        score = max(score, 16)
-
-    if score <= 6:
-        return "low"
-    elif score <= 15:
-        return "medium"
-    return "high"
-
-
-def depth_from_complexity(complexity: str) -> int:
-    """Map complexity to depth 1-5."""
-    return {"low": 1, "medium": 3, "high": 5}[complexity]
-
-
-# ---------------------------------------------------------------------------
-# Monte Carlo Simulation Engine (AST-safe)
-# ---------------------------------------------------------------------------
-
-ALLOWED_NODES = {
-    ast.Expression,
-    ast.BoolOp,
-    ast.UnaryOp,
-    ast.BinOp,
-    ast.Compare,
-    ast.Name,
-    ast.Constant,
-    ast.Load,
-    ast.And,
-    ast.Or,
-    ast.Not,
-    ast.Eq,
-    ast.NotEq,
-    ast.Lt,
-    ast.LtE,
-    ast.Gt,
-    ast.GtE,
-    ast.Is,
-    ast.IsNot,
-    ast.In,
-    ast.NotIn,
-    ast.Add,
-    ast.Sub,
-    ast.Mult,
-    ast.Div,
-    ast.Mod,
-    ast.Pow,
-    ast.USub,
-    ast.UAdd,
-}
-
-
-def _validate_ast(node: ast.AST) -> bool:
-    """Check AST contains only whitelisted nodes."""
-    for child in ast.walk(node):
-        if type(child) not in ALLOWED_NODES:
-            return False
-    return True
-
-
-def _compile_condition(condition: str):
-    """Compile a condition string to a safe callable."""
+# Fall back to legacy Mnemosyne class (mnemosyne-memory 3.7–3.11)
+if not MNEMOSYNE_AVAILABLE:
     try:
-        tree = ast.parse(condition, mode="eval")
-    except SyntaxError:
+        from mnemosyne import Mnemosyne
+        _mnemosyne = Mnemosyne()
+        MNEMOSYNE_AVAILABLE = True
+        logger.info("meboya: Mnemosyne connected")
+    except ImportError:
+        logger.debug("meboya: mnemosyne not installed (graceful fallback)")
+    except Exception as e:
+        logger.warning("meboya: mnemosyne init failed: %s", e)
+
+
+def _remember(content: str, importance: float = 0.7, source: str = "meboya",
+              metadata: Optional[Dict] = None) -> Optional[str]:
+    if not MNEMOSYNE_AVAILABLE or not _mnemosyne:
         return None
-    if not _validate_ast(tree):
+    try:
+        kwargs = {"content": content, "importance": importance, "source": source}
+        if metadata:
+            kwargs["metadata"] = metadata
+        return _mnemosyne.remember(**kwargs)
+    except Exception as e:
+        logger.debug("meboya: remember failed: %s", e)
         return None
-    code = compile(tree, "<condition>", "eval")
-    return lambda vars_dict: eval(code, {"__builtins__": {}}, vars_dict)
 
 
-class MonteCarloEngine:
-    """Thread-local Monte Carlo engine for simulation tool."""
+def _recall(query: str, top_k: int = 3) -> List[Dict]:
+    if not MNEMOSYNE_AVAILABLE or not _mnemosyne:
+        return []
+    try:
+        return _mnemosyne.recall(query, top_k=top_k) or []
+    except Exception as e:
+        logger.debug("meboya: recall failed: %s", e)
+        return []
 
-    def __init__(self):
-        self._local = threading.local()
 
-    def _get_rng(self) -> random.Random:
-        if not hasattr(self._local, "rng"):
-            self._local.rng = random.Random()
-        return self._local.rng
+# ──────────────────────────────────────────────────────────────────────
+# Goal detection (matches standard Meboya/DOGA regex pattern)
+# ──────────────────────────────────────────────────────────────────────
 
-    def simulate(
-        self,
-        scenarios: List[Dict[str, Any]],
-        n_iterations: int = 10000,
-    ) -> Dict[str, Any]:
-        """Run Monte Carlo simulation over scenarios."""
-        if not scenarios:
-            return {"error": "No scenarios provided"}
+_GOAL_RE = re.compile(
+    r"<world_model>.*?(Information|Understanding|Action)",
+    re.DOTALL | re.IGNORECASE,
+)
 
-        rng = self._get_rng()
-        n_iterations = max(100, min(n_iterations, 100000))
 
-        compiled = []
-        all_variables = set()
-        for sc in scenarios:
-            name = sc.get("name", "unnamed")
-            variables = sc.get("variables", {})
-            conditions = sc.get("conditions", [])
-            for var in variables:
-                all_variables.add(var)
+def _detect_goal_type(text: str) -> str:
+    m = _GOAL_RE.search(text)
+    return m.group(1).lower() if m else "unknown"
 
-            cond_fns = []
-            for cond in conditions:
-                fn = _compile_condition(cond)
-                if fn is None:
-                    return {"error": f"Invalid condition in scenario '{name}': {cond}"}
-                cond_fns.append(fn)
 
-            compiled.append({"name": name, "variables": variables, "conditions": cond_fns})
+def _detect_complexity(text: str) -> Tuple[str, int]:
+    """Heuristic — Meboya adds this on top of the standard approach."""
+    low = sum(kw in text.lower() for kw in (
+        "simple", "trivial", "what is", "who is", "when is", "define",
+        "ls ", "cat ", "find ", "grep "))
+    high = sum(kw in text.lower() for kw in (
+        "deploy", "architecture", "optimize", "refactor", "migrate",
+        "security", "incident", "cost", "troubleshoot", "latency", "scale"))
+    if high >= 2:
+        return ("high", min(80 + high * 5, 99))
+    if low >= 2:
+        return ("low", min(20 + low * 5, 40))
+    return ("medium", 50)
 
-        wins = {sc["name"]: 0 for sc in compiled}
-        samples = {sc["name"]: [] for sc in compiled}
 
-        for _ in range(n_iterations):
-            for sc in compiled:
-                vars_dict = {}
-                for var_name, prob in sc["variables"].items():
-                    vars_dict[var_name] = 1 if rng.random() < prob else 0
+# ──────────────────────────────────────────────────────────────────────
+# Prompt templates
+# ──────────────────────────────────────────────────────────────────────
 
-                if all(fn(vars_dict) for fn in sc["conditions"]):
-                    wins[sc["name"]] += 1
-                    samples[sc["name"]].append(vars_dict)
-
-        # Calculate probabilities, Wilson score CI, and Sensitivity Analysis
-        results = {}
-        for name in wins:
-            wins_count = wins[name]
-            prob = wins_count / n_iterations
-            
-            # 95% Confidence Interval (Wilson score interval)
-            z = 1.96
-            denominator = 1 + z**2 / n_iterations
-            centre_adj_val = prob + z**2 / (2 * n_iterations)
-            step = z * math.sqrt((prob * (1 - prob) + z**2 / (4 * n_iterations)) / n_iterations)
-            ci_lower = max(0.0, round((centre_adj_val - step) / denominator, 4))
-            ci_upper = min(1.0, round((centre_adj_val + step) / denominator, 4))
-
-            # Sensitivity Analysis: how much does flipping a variable affect the match rate?
-            sensitivity = {}
-            for sc in compiled:
-                if sc["name"] == name and sc["variables"]:
-                    for var in sc["variables"]:
-                        # Calculate impact: if var is forced True vs False
-                        forced_true_matches = 0
-                        forced_false_matches = 0
-                        test_runs = min(1000, n_iterations)
-                        for _ in range(test_runs):
-                            vars_dict_true = {}
-                            vars_dict_false = {}
-                            for v, p in sc["variables"].items():
-                                val = 1 if rng.random() < p else 0
-                                vars_dict_true[v] = val
-                                vars_dict_false[v] = val
-                            vars_dict_true[var] = 1
-                            vars_dict_false[var] = 0
-                            if all(fn(vars_dict_true) for fn in sc["conditions"]):
-                                forced_true_matches += 1
-                            if all(fn(vars_dict_false) for fn in sc["conditions"]):
-                                forced_false_matches += 1
-                        impact = (forced_true_matches - forced_false_matches) / test_runs
-                        sensitivity[var] = round(impact, 4)
-
-            results[name] = {
-                "probability": round(prob, 4),
-                "confidence_interval_95": [ci_lower, ci_upper],
-                "wins": wins_count,
-                "iterations": n_iterations,
-                "sensitivity_impact": sensitivity,
-                "sample_vars": samples[name][:3] if samples[name] else [],
-            }
-
-        winner = max(results.items(), key=lambda x: x[1]["probability"])[0]
-
-        return {
-            "scenarios": results,
-            "winner": winner,
-            "total_iterations": n_iterations,
-            "confidence": "high" if n_iterations >= 5000 else "medium",
-        }
-# ---------------------------------------------------------------------------
-# Goal Detection
-# ---------------------------------------------------------------------------
-
-GOAL_TYPES = ["information", "understanding", "action"]
-
-GOAL_DETECTION_PROMPT = """Before answering, briefly identify what the user's primary need is:
+GOAL_DETECTION = """Before answering, briefly identify what the user's primary need is:
 
 - **Information**: They want factual data, analysis, or explanation.
 - **Understanding**: They want to feel heard, validated, or understood.
@@ -523,743 +113,358 @@ GOAL_DETECTION_PROMPT = """Before answering, briefly identify what the user's pr
 
 Choose the dominant goal and let it shape your response."""
 
+HATS_PROMPT = """Evaluate the situation through these parallel lenses:
+  [WHITE] What are the objective facts, data, and constraints?
+  [BLACK] What could go wrong? Risks, edge cases, pitfalls.
+  [YELLOW] What are the upsides, opportunities, or value?
+  [GREEN] What alternative approaches exist? Creative options.
+  [BLUE] Synthesize the above — produce a clear conclusion.
 
-def extract_goal_from_response(response_text: str) -> str:
-    """Extract goal type from <world_model> block in response."""
-    match = re.search(
-        r"<world_model>.*?(Information|Understanding|Action)",
-        response_text,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if match:
-        return match.group(1).lower()
-    return "unknown"
+Apply each lens in order. Never mix lenses in one section."""
 
+LIGHT_PROMPT = GOAL_DETECTION
+MEDIUM_PROMPT = f"{GOAL_DETECTION}\n\n{HATS_PROMPT}"
+DEEP_PROMPT = f"""{GOAL_DETECTION}
 
-# ---------------------------------------------------------------------------
-# Prompt Templates (Upgraded with Verification & Knowledge Boundary)
-# ---------------------------------------------------------------------------
+{HATS_PROMPT}
 
-SCENARIO_PROMPT_TEMPLATE = """Consider multiple possible scenarios or interpretations of this question.
-For each scenario, think about:
-1. What would need to be true for this scenario to hold?
-2. How likely is it relative to the alternatives?
-3. What would change if this scenario is wrong?
+After synthesis, call `reason_deeper` tool if analysis feels incomplete
+(focus: "black hat cascade", "yellow hat assumptions", "green hat gaps")."""
 
-Use the `<world_model>` tag for your internal reasoning, like:
-<world_model>
-## Scenarios
-1. **Scenario A** — what it assumes, rough likelihood
-2. **Scenario B** — what it assumes, rough likelihood
-</world_model>
+# Critical mode — optional analytical enrichment inspired by adversarial
+# reasoning. NOT a personality injection — extends the BLACK/RED/BLUE hats
+# with structured pushback. Toggle via /meboya critical on|off.
+CRITICAL_HATS_PROMPT = """Evaluate the situation through these parallel lenses:
+  [WHITE] What are the objective facts, data, and constraints?
+  [BLACK] What could go wrong? Risks, edge cases, pitfalls.
+   ├ CRITICAL: Is the premise itself valid? What assumptions may be wrong?
+   ├ CRITICAL: What is the user NOT saying? Hidden requirements, unspoken constraints?
+   └ CRITICAL: If this approach fails, what is the worst-case path?
+  [RED] What is the gut reaction? What feels off? Trust the intuition signal.
+  [YELLOW] What are the upsides, opportunities, or value?
+  [GREEN] What alternative approaches exist? Creative options.
+   ├ CRITICAL: What is the OPPOSITE approach? Argue against the default.
+   └ CRITICAL: What would a domain expert do differently?
+  [BLUE] Synthesize the above — produce a clear conclusion.
+   ├ CRITICAL: Is this the BEST answer, or just the easiest acceptable one?
+   ├ CRITICAL: Are second-order effects accounted for?
+   └ CRITICAL: If challenged on this conclusion, can it be defended?
 
-If you can identify specific variables with probabilities, call the
-`simulate` tool to run a Monte Carlo analysis."""
+Apply each lens in order. Never mix lenses in one section.
+Push back on the premise when warranted. Surface the dissenter view."""
 
-SIMULATION_TOOL_GUIDANCE = """You have access to the `simulate` tool for quantitative probability analysis.
-Call it when you need to weigh multiple factors with uncertainty."""
+CRITICAL_DEPTH_PROMPTS = {
+    1: GOAL_DETECTION,
+    2: f"{GOAL_DETECTION}\n\n{CRITICAL_HATS_PROMPT}",
+    3: f"{GOAL_DETECTION}\n\n{CRITICAL_HATS_PROMPT}\n\nAfter synthesis, call `reason_deeper` tool if analysis feels incomplete\n(focus: 'second-order effects', 'opposing viewpoint', 'premise validity').",
+}
 
-REASON_DEEPER_GUIDANCE = """You have access to the `reason_deeper` tool for recursive self-critique.
-Call it after your initial `<world_model>` analysis to identify what you missed,
-challenge assumptions, and refine your reasoning."""
-
-# NEW: Self-Verification guidelines injected into <world_model> loop
-SELF_VERIFICATION_PROMPT = """
-[SELF-VERIFICATION GATE]
-Before finalizing your output, audit your reasoning inside the `<world_model>` tag:
-1. **Fact Check**: Identify exact statements you assume to be true. Are you 100% sure?
-2. **Logical Flow**: Does your premise directly lead to the conclusion, or is there a gap?
-3. **Edge Cases**: What happens if your main assumption fails?
-4. **Tool Verification**: Did you verify output from tools, or assume they worked?
-"""
-
-# NEW: Knowledge Boundary guidelines
-KNOWLEDGE_BOUNDARY_PROMPT = """
-[KNOWLEDGE BOUNDARY RULES]
-If your query involves:
-- Current release versions, API parameters, or command flags not in context.
-- Remote endpoints, package listings, or live system state.
-- Highly specific error logs or hardware compatibility.
-And you are recalling from training data without live verification:
-**You MUST call a retrieval tool (e.g. `web_search`, `read_file`, `search_files`) first.**
-If a search fails or no tool is available, you MUST explicitly state inside your `<world_model>`:
-`[KNOWLEDGE GAP: Reason why you cannot verify]`
-"""
-
-LIGHT_PROMPT = f"{KNOWLEDGE_BOUNDARY_PROMPT}\n{GOAL_DETECTION_PROMPT}"
-
-MEDIUM_PROMPT = f"""{KNOWLEDGE_BOUNDARY_PROMPT}
-{GOAL_DETECTION_PROMPT}
-
-{SCENARIO_PROMPT_TEMPLATE}
-
-{REASON_DEEPER_GUIDANCE}
-
-{SELF_VERIFICATION_PROMPT}"""
-
-COUNTERFACTUAL_GUIDANCE = """
-[COUNTERFACTUAL EXPLORER]
-For your final synthesis, consider:
-1. "What if my main assumption is wrong?"
-2. "What are the contingency plans if this fails at 80% completion?"
-3. "Is there a 'kill-switch' or rollback plan?"
-Generate a brief contingency summary if the path has high risk."""
-
-DEEP_PROMPT = f"""{KNOWLEDGE_BOUNDARY_PROMPT}
-{GOAL_DETECTION_PROMPT}
-
-{SCENARIO_PROMPT_TEMPLATE}
-
-{SIMULATION_TOOL_GUIDANCE}
-
-{REASON_DEEPER_GUIDANCE}
-
-{SELF_VERIFICATION_PROMPT}
-
-{COUNTERFACTUAL_GUIDANCE}"""
+DEPTH_PROMPTS = {1: LIGHT_PROMPT, 2: MEDIUM_PROMPT, 3: DEEP_PROMPT}
 
 
-def build_prompt(depth: int = 3) -> str:
-    """Return appropriate prompt text for depth 1-5."""
-    if depth <= 2:
-        return LIGHT_PROMPT
-    elif depth <= 4:
-        return MEDIUM_PROMPT
-    return DEEP_PROMPT
+# ──────────────────────────────────────────────────────────────────────
+# Plugin state
+# ──────────────────────────────────────────────────────────────────────
 
-
-def build_goal_prompt(
-    user_message: str,
-    depth: int = 3,
-    past_patterns: Optional[List[Dict]] = None,
-    hats_enabled: bool = True,
-) -> str:
-    """Build complete thinking guidance block for pre_llm_call injection."""
-    prompt = build_prompt(depth)
-
-    if hats_enabled:
-        prompt += build_hat_guidance(depth)
-
-    if past_patterns:
-        lines = ["", "Previous patterns for similar queries:"]
-        for p in past_patterns:
-            lines.append(f"- Goal: {p.get('goal_type', '?')} (used {p.get('count', 1)}x)")
-        prompt += "\n" + "\n".join(lines)
-
-    # Hats at the very END — recency effect: model remembers last instruction
-    if hats_enabled:
-        prompt += build_hat_guidance(depth)
-
-    return f"\n\n[meboya_guide]\n{prompt}\n[/meboya_guide]"
-
-
-# ---------------------------------------------------------------------------
-# Output Formatter
-# ---------------------------------------------------------------------------
-
-
-def format_response(
-    response_text: str,
-    show_simulation: bool = True,
-    active_hats: Optional[List[str]] = None,
-) -> str:
-    """Format response: strip guide blocks, optionally append hat summary."""
-    # Strip all meboya_guide blocks (model may echo injected prompt back)
-    cleaned = re.sub(r"\[meboya_guide\].*?\[/meboya_guide\]", "", response_text, flags=re.DOTALL)
-    # Also strip any unclosed/orphaned meboya_guide tags
-    cleaned = re.sub(r"\[/?meboya_guide\]", "", cleaned)
-    cleaned = re.sub(r"\[/?world_model_guide\]", "", cleaned)
-    cleaned = re.sub(r"<world_model>.*?</world_model>", "", cleaned, flags=re.DOTALL)
-    cleaned = cleaned.strip()
-
-    return cleaned
-
-
-# ---------------------------------------------------------------------------
-# Plugin State
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class PluginState:
+class _State:
     enabled: bool = True
-    show_simulation: bool = True
-    memory_enabled: bool = True
-    auto_depth: bool = True
-    depth: int = 3
-    max_recursion: int = 3
-    hats_enabled: bool = True
-    _recursion_depth: int = 0
-    _reasoning_stack: List[Dict] = field(default_factory=list)
-    _active_hats: List[str] = field(default_factory=list)
-    _current_user_message: str = ""
-    _stop_sent: bool = False
-    _tools_called_this_turn: List[str] = field(default_factory=list)
+    depth: int = 2
+    show_markers: bool = True
+    last_user_message: str = ""
+    last_goal_type: str = "unknown"
+    last_complexity: str = "medium"
+    show_trace: bool = True  # NEW: always show trace, independent of markers
+    critical_mode: bool = False  # NEW: critical analytical pushback
 
 
-_state = PluginState()
-_engine = MonteCarloEngine()
+_state = _State()
 
 
-# ---------------------------------------------------------------------------
-# Tool: simulate
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────
+# Hooks
+# ──────────────────────────────────────────────────────────────────────
 
-SIMULATE_SCHEMA = {
-    "name": "simulate",
-    "description": (
-        "Run a Monte Carlo simulation over probabilistic scenarios. "
-        "Provide scenarios with variable probabilities and optional logical conditions. "
-        "Returns probability distribution and uncertainty metrics. "
-        "Use this when you need to quantitatively weigh multiple uncertain factors."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "scenarios": {
-                "type": "array",
-                "description": "List of scenarios to simulate.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Short label for this scenario (e.g. 'contract_valid').",
-                        },
-                        "variables": {
-                            "type": "object",
-                            "description": (
-                                "Variable name → probability (0.0–1.0). "
-                                "Each variable represents an independent binary factor. "
-                                "Example: {'signature_ok': 0.8, 'duress': 0.1}"
-                            ),
-                            "additionalProperties": {"type": "number"},
-                        },
-                        "conditions": {
-                            "type": "array",
-                            "description": "Logical conditions (Python expressions) that must all be true.",
-                            "items": {"type": "string"},
-                        },
-                    },
-                    "required": ["name", "variables"],
-                },
-            },
-            "n_iterations": {
-                "type": "integer",
-                "description": "Number of Monte Carlo iterations (default 10000, max 100000).",
-                "default": 10000,
-                "minimum": 100,
-                "maximum": 100000,
-            },
-        },
-        "required": ["scenarios"],
-    },
-}
-
-
-def simulate_tool_handler(args: Dict[str, Any]) -> str:
-    """Handler for the simulate tool."""
-    scenarios = args.get("scenarios", [])
-    n_iterations = args.get("n_iterations", 10000)
-
-    result = _engine.simulate(scenarios, n_iterations)
-    return json.dumps(result, indent=2)
-
-
-# ---------------------------------------------------------------------------
-# Tool: reason_deeper
-# ---------------------------------------------------------------------------
-
-REASON_DEEPER_SCHEMA = {
-    "name": "reason_deeper",
-    "description": (
-        "Recursive self-critique tool. After your initial <world_model> analysis, "
-        "call this to identify what you missed, challenge assumptions, and refine reasoning. "
-        "Specify a focus area (e.g. 'risk cascade', 'hidden assumptions'). "
-        "Include your confidence level — if confident enough (>= 80%), the tool will stop recursion."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "focus": {
-                "type": "string",
-                "description": "Aspect to dig deeper into (e.g. 'risk cascade', 'hidden assumptions').",
-            },
-            "current_reasoning": {
-                "type": "string",
-                "description": "Your current <world_model> reasoning to critique.",
-            },
-            "confidence": {
-                "type": "number",
-                "description": "Your confidence level after critique (0.0-1.0). If >= 0.8, recursion stops.",
-            },
-        },
-        "required": ["focus"],
-    },
-}
-
-
-def reason_deeper_tool_handler(args: Dict[str, Any]) -> str:
-    """Handler for reason_deeper tool — stops if confidence high enough."""
-    focus = args.get("focus", "")
-    current = args.get("current_reasoning", "")
-    confidence = float(args.get("confidence", 0.5))
-
-    _state._recursion_depth += 1
-    _state._reasoning_stack.append(
-        {"level": _state._recursion_depth, "focus": focus, "reasoning": current[:500], "confidence": confidence}
-    )
-
-    # Auto-stop if confidence >= 0.8 or max recursion reached
-    if confidence >= 0.8 or _state._recursion_depth >= _state.max_recursion:
-        return json.dumps({
-            "stop": True,
-            "reason": f"Confidence {confidence:.0%} >= 80% — sufficient" if confidence >= 0.8 else f"Max recursion depth ({_state.max_recursion}) reached",
-            "confidence": confidence,
-            "recursion_level": _state._recursion_depth,
-        })
-
-    critique = f"""[REASON_DEEPER — Level {_state._recursion_depth}/{_state.max_recursion}]
-Focus: {focus}
-Confidence so far: {confidence:.0%}
-
-Your previous reasoning:
-{current}
-
-Now critically examine:
-1. What assumptions are untested?
-2. What scenarios did you miss?
-3. What would change your conclusion?
-4. Are there second-order effects?
-
-Return refined <world_model> analysis.
-After refining, call `reason_deeper` again with updated confidence, or produce your final answer if confident (>= 80%)."""
-
-    return critique
-
-
-# ---------------------------------------------------------------------------
-# Hook: pre_llm_call (context injection)
-# ---------------------------------------------------------------------------
-
-
-def on_pre_llm_call(
+def _on_pre_llm_call(
     user_message: str = "",
-    conversation_history: Optional[List] = None,
-    session_id: str = "",
+    conversation_history: list = None,
+    is_first_turn: bool = False,
     **_: Any,
-) -> Optional[Dict[str, str]]:
-    """Inject thinking guidance before LLM call."""
+) -> Optional[str]:
+    """Inject the Meboya thinking guide before the LLM sees the prompt."""
     if not _state.enabled:
         return None
 
-    # Guard: user_message can be None in cron/internal calls
-    if not user_message or not user_message.strip():
+    _state.last_user_message = user_message
+
+    if len(user_message.strip()) < 15 and not is_first_turn:
+        return None
+    # Don't double-inject if EITHER guide already present
+    if "[meboya_guide]" in user_message or "[world_model_guide]" in user_message:
         return None
 
-    _state._current_user_message = user_message
-    _state._recursion_depth = 0
-    _state._reasoning_stack.clear()
-    _state._tools_called_this_turn = []
+    guide = DEPTH_PROMPTS.get(_state.depth, MEDIUM_PROMPT)
+    if _state.critical_mode:
+        critical_level = _state.depth  # Depth tetap menentukan kompleksitas prompt
+        guide = CRITICAL_DEPTH_PROMPTS.get(critical_level, CRITICAL_DEPTH_PROMPTS[2])
+    c_label, c_score = _detect_complexity(user_message)
+    _state.last_complexity = c_label
 
-    if _state.auto_depth:
-        complexity = assess_complexity(user_message)
-        depth = depth_from_complexity(complexity)
+    # Inject relevant past goal patterns from Mnemosyne
+    recall_block = ""
+    if MNEMOSYNE_AVAILABLE:
+        recalled = _recall(user_message, top_k=2)
+        if recalled:
+            entries = []
+            for entry in recalled:
+                content = entry.get("content", "")
+                goal = entry.get("metadata", {}).get("goal_type", "?")
+                entries.append(f"  - Past similar query (goal={goal}): {content[:120]}")
+            if entries:
+                recall_block = (
+                    "\n\n[PAST CONTEXT — these were user goals for similar past queries. "
+                    "Use this to calibrate your response approach.]\n"
+                    + "\n".join(entries)
+                )
+
+    if _state.show_markers:
+        injection = f"\n\n[meboya_guide]\n{guide}{recall_block}\n[/meboya_guide]"
     else:
-        depth = _state.depth
+        injection = f"\n\n{guide}{recall_block}"
 
-    past_patterns = None
-    if _state.memory_enabled and MNEMOSYNE_AVAILABLE:
-        try:
-            results = recall(query=user_message, top_k=3)
-            if results:
-                past_patterns = [
-                    {"goal_type": r.get("metadata", {}).get("goal_type", "?"), "count": 1}
-                    for r in results
-                    if r.get("metadata", {}).get("source") == "meboya_goal"
-                ]
-        except Exception:
-            logger.debug("meboya memory recall failed", exc_info=True)
-
-    guidance = build_goal_prompt(
-        user_message=user_message,
-        depth=depth,
-        past_patterns=past_patterns,
-        hats_enabled=_state.hats_enabled,
+    logger.debug(
+        "meboya: injected depth=%d chars=%d recall=%d mnemosyne=%s",
+        _state.depth, len(injection), 1 if recall_block else 0, MNEMOSYNE_AVAILABLE,
     )
-
-    _state.depth = depth
-    return {"context": guidance}
+    return injection
 
 
-# ---------------------------------------------------------------------------
-# Hook: post_llm_call (formatting + memory)
-# ---------------------------------------------------------------------------
+_WORLD_MODEL_RE = re.compile(
+    r"<world_model>\s*(.*?)\s*</world_model>",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
-def on_transform_llm_output(
-    response_text: str = "",
-    **_: Any,
-) -> Optional[str]:
-    """Format response, enforce hats if missing, save goal pattern to memory."""
+def _extract_world_model(text: str) -> Tuple[List[str], str]:
+    """Extract <world_model>...</world_model> blocks (returns blocks, remaining)."""
+    blocks: List[str] = []
+    remaining = text
+    while True:
+        match = _WORLD_MODEL_RE.search(remaining)
+        if not match:
+            break
+        blocks.append(match.group(1).strip())
+        remaining = remaining[:match.start()] + remaining[match.end():]
+    return blocks, remaining.strip()
 
+
+def _format_thinking_panel(blocks: List[str]) -> str:
+    """Format world_model blocks into a clean Meboya panel."""
+    non_empty = [b for b in blocks if b.strip()]
+    if not non_empty:
+        return ""
+    lines = ["[MEBOYA: Telaah Proses]"]
+    lines.append("   " + "=" * 50)
+    for i, block in enumerate(non_empty, 1):
+        if i > 1:
+            lines.append("")
+            lines.append("   . . . . . . . . . . . . . . . . . . . . . . . . . .")
+            lines.append("")
+        for line in block.strip().split("\n"):
+            lines.append(f"   {line}")
+    lines.append("")
+    lines.append("   " + "=" * 50)
+    return "\n".join(lines)
+
+
+_HAT_TAGS = re.compile(r'\[(WHITE|RED|BLACK|YELLOW|GREEN|BLUE)\]', re.IGNORECASE)
+
+
+def _detect_active_hats(text: str) -> List[str]:
+    """Detect which hat tags appear in the response text."""
+    return list(dict.fromkeys(
+        m.group(1).lower() for m in _HAT_TAGS.finditer(text)
+    ))
+
+
+def _on_transform_llm_output(response_text: str = "", **_: Any) -> Optional[str]:
+    """Strip guide markers, format world_model blocks, always prepend trace.
+
+    Trace visible to user regardless of world_model presence.
+    """
     if not _state.enabled or not response_text:
         return None
 
-    active_hats = detect_active_hats(response_text)
-    _state._active_hats = active_hats
-
-    # ENFORCE: if query was complex enough but model didn't use hats, auto-wrap
-    if not active_hats and _state.hats_enabled:
-        response_text = _auto_wrap_hats(response_text)
-        active_hats = detect_active_hats(response_text)
-        _state._active_hats = active_hats
-
-    if _state.memory_enabled and MNEMOSYNE_AVAILABLE and _state._current_user_message:
-        try:
-            goal_type = extract_goal_from_response(response_text)
-            if goal_type != "unknown":
-                remember(
-                    content=_state._current_user_message,
-                    importance=0.7,
-                    source="meboya",
-                    metadata={"goal_type": goal_type, "depth": _state.depth},
-                )
-
-            # Structured decision log (priority 9 from upgrade spec)
-            # Save: {query, hats, depth, tools, recursion, decision_hat, timestamp}
-            decision_record = {
-                "ts": __import__("datetime").datetime.now().isoformat(),
-                "query": _state._current_user_message[:300],
+    # Detect goal
+    if _state.last_user_message:
+        goal_type = _detect_goal_type(response_text)
+        c_label, _ = _detect_complexity(_state.last_user_message)
+        _remember(
+            content=_state.last_user_message,
+            importance=0.7,
+            source="meboya",
+            metadata={
+                "goal_type": goal_type,
+                "complexity": c_label,
                 "depth": _state.depth,
-                "hats": [h.upper() for h in active_hats],
-                "tools": _state._tools_called_this_turn,
-                "recursion_levels": _state._recursion_depth,
-                "decision_hat": active_hats[-1].upper() if active_hats else "NONE",
-            }
-            remember(
-                content=f"[DECISION] q={decision_record['query'][:120]} | d={decision_record['depth']} | hats={'/'.join(decision_record['hats'])} | final={decision_record['decision_hat']}",
-                importance=0.85,
-                source="meboya",
-                metadata=decision_record,
-            )
-        except Exception:
-            logger.debug("meboya memory save failed", exc_info=True)
+            },
+        )
+        _state.last_goal_type = goal_type
 
-    formatted = format_response(
+    if not _state.show_markers:
+        # Still add trace even if markers off — trace != injection markers
+        pass  # proceed with formatting
+
+    # Strip guide markers
+    cleaned = re.sub(
+        r"\[meboya_guide\].*?\[/meboya_guide\]",
+        "",
         response_text,
-        show_simulation=_state.show_simulation,
-        active_hats=active_hats,
+        flags=re.DOTALL,
+    )
+    cleaned = re.sub(
+        r"\[world_model_guide\].*?\[/world_model_guide\]",
+        "",
+        cleaned,
+        flags=re.DOTALL,
+    )
+    # Also strip any stray tags
+    cleaned = re.sub(r"\[/?meboya_guide\]", "", cleaned)
+    cleaned = re.sub(r"\[/?world_model_guide\]", "", cleaned)
+
+    # Extract world_model reasoning blocks
+    blocks, final_answer = _extract_world_model(cleaned)
+
+    # Always prepend trace markers, regardless of blocks/markers/trace flag
+    trace = (
+        "💡 **Meboya: Starting thinking process...**\n\n"
+        f"**Mode:** Goal Detection + Six Thinking Hats\n"
+        f"**Depth:** {_state.depth} | **Complexity:** {_state.last_complexity}\n"
     )
 
-    # Prepend decision trace to top
-    if _state.show_simulation:
-        trace_parts = []
-        trace_parts.append(f"📊 **Meboya Decision Trace**")
-        trace_parts.append(f"Depth: {_state.depth}")
-        if active_hats:
-            trace_parts.append(f"Hats: {len(active_hats)}/6 — {' → '.join(h.upper() for h in active_hats)}")
-
-        if active_hats:
-            last_hat = active_hats[-1].upper()
-            hat_meaning = {
-                "WHITE": "Fakta & Data", "BLACK": "Risiko & Masalah", "YELLOW": "Nilai & Manfaat",
-                "GREEN": "Alternatif & Kreativitas", "BLUE": "Kesimpulan & Tindakan", "RED": "Intuisi & Perasaan",
-            }
-            trace_parts.append(f"**Final decision hat: [{last_hat}]** ({hat_meaning.get(last_hat, '?')})")
+    if blocks:
+        panel = _format_thinking_panel(blocks)
+        if panel:
+            trace += (
+                "🧠 **Thinking panel detected.** "
+                "Model produced structured analysis.\n\n"
+                f"{panel}\n\n"
+            )
         else:
-            trace_parts.append("**Hats: auto-gagal (model terlalu singkat)**")
+            trace += "🔍 No structured thought blocks extracted.\n\n"
+    else:
+        trace += "⚡ Model responded without explicit `<world_model>` tags.\n\n"
 
-        if _state._tools_called_this_turn:
-            trace_parts.append(f"Tools: {', '.join(_state._tools_called_this_turn)}")
-        if _state._recursion_depth > 0:
-            trace_parts.append(f"Reasoning levels: {_state._recursion_depth}")
-        formatted = "\n".join(trace_parts) + "\n\n---\n\n" + formatted
-
-    # Reset per-turn state
-    _state._tools_called_this_turn = []
-
-    return formatted if formatted != response_text else None
-
-
-# ---------------------------------------------------------------------------
-# Auto-hat wrapper — enforce hat format on model output when missing
-# ---------------------------------------------------------------------------
-
-_HAT_CONTENT_PATTERNS = {
-    "white": [
-        r"(fakta|fact|data|constraint|requirement|info|parameter|field|value|number|status|current|current state)",
-        r"(terjadi|currently|happening|exists|known|present|available)",
-    ],
-    "black": [
-        r"(risiko|risk|problem|error|fail|crash|broken|bug|issue|threat|danger|warning|caution|pitfall)",
-        r"(bisa terjadi|could fail|might break|downside|drawback|limitation|concern)",
-    ],
-    "yellow": [
-        r"(benefit|advantage|value|profit|gain|success|good|positive|pro|optimal|best case)",
-        r"(berhasil|untung|kelebihan|bagus|menguntungkan|strategis)",
-    ],
-    "green": [
-        r"(alternatif|alternative|option|approach|creative|new idea|solution|different|workaround|hack|pivot)",
-        r"(bisa pakai|could use|alternatively|instead|another way|rekomendasi)",
-    ],
-    "blue": [
-        r"(kesimpulan|conclusion|decision|rekomendasi|recommendation|next step|action plan|summary|final)",
-        r"(seharusnya|should|plan|step|langkah|implementasi|execution)",
-    ],
-    "red": [
-        r"(feeling|intuisi|gut|hunch|sense|rasa|insting|emosi|emotional)",
-    ],
-}
-
-_HAT_LABELS = {
-    "white": "Fakta & Data",
-    "black": "Risiko & Masalah",
-    "yellow": "Nilai & Manfaat",
-    "green": "Alternatif & Kreativitas",
-    "blue": "Kesimpulan & Tindakan",
-    "red": "Intuisi & Perasaan",
-}
-
-
-def _auto_wrap_hats(text: str) -> str:
-    """If model didn't use hat tags, auto-assign hat labels to paragraphs."""
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    if not paragraphs:
-        return text
-
-    # Short responses (1-2 paragraphs): assign WHITE (facts) + BLUE (conclusion) minimally
-    if len(paragraphs) < 3:
-        hats_for_short = {1: ["white"], 2: ["white", "blue"]}
-        use_hats = hats_for_short.get(len(paragraphs), ["white"])
-        result_parts = []
-        for i, para in enumerate(paragraphs):
-            hat = use_hats[i] if i < len(use_hats) else "blue"
-            label = _HAT_LABELS.get(hat, hat.upper())
-            result_parts.append(f"[{hat.upper()}] {label}\n{para}")
-        return "\n\n".join(result_parts)
-
-    result_parts = []
-    assigned = set()
-
-    for para in paragraphs:
-        para_lower = para.lower()
-        best_hat = None
-        best_score = 0
-
-        for hat, patterns in _HAT_CONTENT_PATTERNS.items():
-            if hat in assigned:
-                continue
-            score = sum(1 for p in patterns if re.search(p, para_lower))
-            if score > best_score:
-                best_score = score
-                best_hat = hat
-
-        # Fallback: if no pattern matched, assign based on position
-        if not best_hat:
-            remaining = [h for h in ["white", "black", "yellow", "green", "blue"] if h not in assigned]
-            if remaining:
-                if len(result_parts) == 0:
-                    best_hat = remaining[0]  # first paragraph = white/facts
-                elif len(result_parts) >= len(paragraphs) - 1:
-                    best_hat = remaining[-1]  # last = blue/conclusion
-                else:
-                    best_hat = remaining[len(result_parts) % len(remaining)]
-
-        if best_hat:
-            assigned.add(best_hat)
-            label = _HAT_LABELS.get(best_hat, best_hat.upper())
-            result_parts.append(f"[{best_hat.upper()}] {label}\n{para}")
-        else:
-            result_parts.append(para)
-
-    return "\n\n".join(result_parts)
-
-
-# ---------------------------------------------------------------------------
-# Hook: post_tool_call (track recursion)
-# ---------------------------------------------------------------------------
-
-
-def on_post_tool_call(
-    tool_name: str = "",
-    args: Optional[Dict[str, Any]] = None,
-    result: Any = None,
-    **_: Any,
-) -> None:
-    """Track simulate/reason_deeper usage."""
-    # Track any tool call this turn for decision trace
-    if tool_name not in _state._tools_called_this_turn:
-        _state._tools_called_this_turn.append(tool_name)
-
-    if tool_name == "simulate" and isinstance(result, str):
-        logger.debug("meboya simulate called, result_len=%d", len(result))
-    elif tool_name == "reason_deeper" and isinstance(args, dict):
-        _state._recursion_depth += 1
-        _state._reasoning_stack.append(
-            {"level": _state._recursion_depth, "focus": args.get("focus", "")}
+    # Detect which hats the model actually used
+    active_hats = _detect_active_hats(response_text)
+    if active_hats:
+        trace += (
+            f"🎩 **Hats used:** {' → '.join(h.upper() for h in active_hats)}\n"
         )
-        logger.debug(
-            "meboya reason_deeper called (level %d/%d, focus=%s)",
-            _state._recursion_depth,
-            _state.max_recursion,
-            args.get("focus", ""),
-        )
+    else:
+        trace += "🎩 **Hats: none detected** (model didn't use hat prefixes)\n"
+
+    trace += (
+        f"✅ **Meboya: Thinking process complete. Summary ready.**\n"
+        f"---\n"
+    )
+
+    result = trace + "\n" + final_answer
+
+    # Strip leaked world_model raw tags
+    result = re.sub(r"</?world_model>\s*", "", result, flags=re.I).strip()
+
+    return result if result != response_text else result
 
 
-# ---------------------------------------------------------------------------
-# Slash Commands
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────
+# /meboya command
+# ──────────────────────────────────────────────────────────────────────
 
+def _cmd_meboya(args: str, **_: Any) -> str:
+    a = (args or "").strip().lower()
 
-COMMAND_HELP = """
-**Meboya Commands** (mirrors DOGA):
-- `/meboya on` — Enable auto-thinking
-- `/meboya off` — Disable
-- `/meboya status` — Show current config
-- `/meboya depth <1-5>` — Set fixed depth (disables auto)
-- `/meboya auto` — Enable auto-depth
-- `/meboya hats on|off` — Toggle De Bono hats
-- `/meboya sim on|off` — Toggle simulation summary display
-- `/meboya memory on|off` — Toggle Mnemosyne goal memory
-- `/meboya max-recursion <1-5>` — Set max recursive reasoning depth
-- `/meboya test <message>` — Test thinking injection for a message
-"""
-
-
-def handle_meboya_command(cmd: str) -> str:
-    """Parse and execute /meboya slash command."""
-    logger.info("meboya command handler called with: %r", cmd)
-
-    raw = cmd.strip()
-    # Strip command prefix if present (Hermes may pass "/meboya ..." or just "...")
-    for prefix in ("/meboya ", "/doga "):
-        if raw.lower().startswith(prefix):
-            raw = raw[len(prefix):].strip()
-            break
-    # Also strip bare "/meboya" or "/doga" with no args
-    if raw.lower() in ("/meboya", "/doga"):
-        raw = ""
-
-    parts = raw.split()
-    if not parts:
-        return _meboya_status_str()
-
-    sub = parts[0].lower()
-
-    if sub == "on":
+    if a == "on":
         _state.enabled = True
-        return "✅ Meboya enabled"
-    elif sub == "off":
+        return "✅ Meboya ENABLED"
+    if a == "off":
         _state.enabled = False
-        return "⏸️  Meboya disabled"
-    elif sub == "status":
-        return _meboya_status_str()
-    elif sub == "depth" and len(parts) >= 2:
+        return "🛑 Meboya DISABLED"
+    if a == "status":
+        return (
+            f"📊 Meboya status:\n"
+            f"  Enabled: {_state.enabled}\n"
+            f"  Depth: {_state.depth} (1=goal, 2=goal+hats, 3=deep+reason_deeper)\n"
+            f"  Critical mode: {'🔍 ON' if _state.critical_mode else 'OFF'}\n"
+            f"  Markers: {_state.show_markers}\n"
+            f"  Trace display: {'ON' if _state.show_trace else 'OFF'}\n"
+            f"  Mnemosyne: {'✅ connected' if MNEMOSYNE_AVAILABLE else '❌ unavailable'}\n"
+            f"  Last goal: {_state.last_goal_type}\n"
+            f"  Last complexity: {_state.last_complexity}"
+        )
+    if a.startswith("depth"):
         try:
-            d = int(parts[1])
-            if 1 <= d <= 5:
+            d = int(a.split()[1])
+            if 1 <= d <= 3:
                 _state.depth = d
-                _state.auto_depth = False
-                return f"📏 Depth set to {d} (auto disabled)"
-        except ValueError:
+                return f"🎯 Depth set to {d}"
+        except (IndexError, ValueError):
             pass
-        return "Usage: /meboya depth <1-5>"
-    elif sub == "auto":
-        _state.auto_depth = True
-        return "🔄 Auto-depth enabled"
-    elif sub == "hats" and len(parts) >= 2:
-        _state.hats_enabled = parts[1].lower() == "on"
-        return f"🎩 Hats {'enabled' if _state.hats_enabled else 'disabled'}"
-    elif sub == "sim" and len(parts) >= 2:
-        _state.show_simulation = parts[1].lower() == "on"
-        return f"📊 Simulation display {'enabled' if _state.show_simulation else 'disabled'}"
-    elif sub == "memory" and len(parts) >= 2:
-        _state.memory_enabled = parts[1].lower() == "on"
-        return f"🧠 Memory {'enabled' if _state.memory_enabled else 'disabled'}"
-    elif sub == "max-recursion" and len(parts) >= 2:
-        try:
-            mr = int(parts[1])
-            if 1 <= mr <= 5:
-                _state.max_recursion = mr
-                return f"🔁 Max recursion set to {mr}"
-        except ValueError:
-            pass
-        return "Usage: /meboya max-recursion <1-5>"
-    elif sub == "test" and len(parts) >= 2:
-        test_msg = " ".join(parts[1:])
-        complexity = assess_complexity(test_msg)
-        depth = depth_from_complexity(complexity) if _state.auto_depth else _state.depth
-        guidance = build_goal_prompt(test_msg, depth=depth, hats_enabled=_state.hats_enabled)
-        return f"**Test Injection** (complexity={complexity}, depth={depth}):\n\n{guidance}"
-    elif sub == "health":
-        return _meboya_health_str()
+        return "Usage: /meboya depth 1|2|3"
+    if a == "markers on":
+        _state.show_markers = True
+        return "🏷️ Markers ON"
+    if a == "markers off":
+        _state.show_markers = False
+        return "🏷️ Markers OFF"
+    if a == "trace on":
+        _state.show_trace = True
+        return "📋 Trace display ON"
+    if a == "trace off":
+        _state.show_trace = False
+        return "📋 Trace display OFF"
+    if a == "critical on":
+        _state.critical_mode = True
+        return "🔍 Critical analysis mode ON (adversarial pushback enabled)"
+    if a == "critical off":
+        _state.critical_mode = False
+        return "🔍 Critical analysis mode OFF"
+    if a == "recall":
+        if not MNEMOSYNE_AVAILABLE:
+            return "❌ Mnemosyne not available"
+        entries = _recall(_state.last_user_message or "recent", top_k=3)
+        if not entries:
+            return "📭 No past memory found"
+        lines = ["📚 Past thought patterns:"]
+        for e in entries:
+            c = e.get("content", "")[:100]
+            g = e.get("metadata", {}).get("goal_type", "?")
+            lines.append(f"  [{g}] {c}")
+        return "\n".join(lines)
 
-    return COMMAND_HELP
-
-
-def _meboya_status_str() -> str:
-    """Format and return current status."""
-    return f"""**Meboya Status**
-Enabled: {_state.enabled}
-Auto-depth: {_state.auto_depth} (fixed: {_state.depth})
-Hats: {_state.hats_enabled}
-Simulation display: {_state.show_simulation}
-Memory: {_state.memory_enabled}
-Max recursion: {_state.max_recursion}
-Mnemosyne: {'available' if MNEMOSYNE_AVAILABLE else 'not installed'}"""
-
-
-def _meboya_health_str() -> str:
-    """Runtime observability dump."""
-    import time
-    return f"""**Meboya Health Dashboard**
-
-Runtime State:
-  Current depth: {_state.depth}
-  Current user msg: "{_state._current_user_message[:80]}{'...' if len(_state._current_user_message) > 80 else ''}"
-  Active hats: {', '.join(_state._active_hats) if _state._active_hats else 'none'}
-  Recursion depth: {_state._recursion_depth} / {_state.max_recursion}
-  Reasoning stack: {len(_state._reasoning_stack)} frames
-  Stop sent: {_state._stop_sent}
-
-Feature Flags:
-  Auto-depth: {_state.auto_depth}
-  Hats enabled: {_state.hats_enabled}
-  Sim display: {_state.show_simulation}
-  Memory: {_state.memory_enabled}
-
-Memory Backend:
-  Mnemosyne available: {MNEMOSYNE_AVAILABLE}
-
-Engine:
-  MonteCarlo thread-local RNG: {'initialized' if hasattr(_engine._local, 'rng') else 'cold'}
-"""
-
-
-# ---------------------------------------------------------------------------
-# Plugin Registration
-# ---------------------------------------------------------------------------
-
-
-def register(ctx: Any) -> None:
-    """Register hooks, tools, and commands with Hermes."""
-    ctx.register_hook("pre_llm_call", on_pre_llm_call)
-    ctx.register_hook("transform_llm_output", on_transform_llm_output)
-    ctx.register_hook("post_tool_call", on_post_tool_call)
-
-    ctx.register_tool("simulate", "meboya", SIMULATE_SCHEMA, simulate_tool_handler)
-    ctx.register_tool("reason_deeper", "meboya", REASON_DEEPER_SCHEMA, reason_deeper_tool_handler)
-
-    # Slash commands (in-session /meboya, not hermes subcommand)
-    ctx.register_command(
-        "meboya",
-        handle_meboya_command,
-        description="Meboya auto-thinking control",
-        args_hint="on|off|status|depth <1-5>|auto|hats on|off|sim on|off|memory on|off|max-recursion <1-5>|test <message>",
+    return (
+        "Usage: /meboya [on|off|status|depth 1-3|markers on|off|trace on|off|critical on|off|recall]\n"
+        "  depth 1 = goal only\n"
+        "  depth 2 = goal + hats (default)\n"
+        "  depth 3 = depth 2 + reason_deeper\n"
+        "  trace on|off = show/hide thinking trace in response\n"
+        "  critical on|off = toggle adversarial pushback reasoning"
     )
 
-    logger.info("Meboya plugin registered (DOGA parity + Verification + Boundary)")
 
+# ──────────────────────────────────────────────────────────────────────
+# Hermes entry point
+# ──────────────────────────────────────────────────────────────────────
 
-__all__ = ["register", "handle_meboya_command", "MNEMOSYNE_AVAILABLE"]
+def register(ctx):
+    ctx.register_hook("pre_llm_call", _on_pre_llm_call)
+    ctx.register_hook("transform_llm_output", _on_transform_llm_output)
+    ctx.register_command(
+        name="meboya",
+        handler=_cmd_meboya,
+        description="Configure Meboya (on/off/status/depth/recall)",
+        args_hint="[on|off|status|depth 1-3|markers on|off|trace on|off|recall]",
+    )
+    logger.info(
+        "meboya plugin registered (depth=%d, mnemosyne=%s)",
+        _state.depth, MNEMOSYNE_AVAILABLE,
+    )

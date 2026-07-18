@@ -1,15 +1,9 @@
 name: meboya
-version: "1.0.0"
-description: "Auto-thinking with De Bono Six Hats + Monte Carlo simulation + recursive reasoning (DOGA parity)."
+version: "2.1.0"
+description: "Auto-thinking with De Bono Six Hats + Goal detection + Critical mode + Mnemosyne memory."
 author: "prajadiputra"
 license: MIT
 homepage: "https://github.com/prajadiputra/Meboya"
-hooks:
+provides_hooks:
   - pre_llm_call
   - transform_llm_output
-  - post_tool_call
-commands:
-  - meboya
-tools:
-  - simulate
-  - reason_deeper
