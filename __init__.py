@@ -129,7 +129,18 @@ Use `<world_model>` for internal reasoning, then output your answer with:
 [BLACK] Eventual consistency introduces complexity. Rollback strategy must be redesigned. Consumer lag in high-concurrency can cause data staleness.
 [YELLOW] Decoupling enables independent scaling per service. NATS/Kafka throughput exceeds shared DB by 10-100x.
 [GREEN] Alternative: keep Redis for caching + SQL for events with Debezium CDC as stepping stone before full EDA.
-[BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang."""
+[BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang.
+
+**MANDATORY: After completing all hats, output a [SUMMARY] block at the very end.**
+
+[SUMMARY]
+- **Decision Hat:** BLUE (Synthesis)
+- **Selected Strategy:** [the specific option chosen and why]
+- **Key Reason:** [the single most important factor that drove the decision]
+- **Risk Accepted:** [what risk is being taken and why it's worth it]
+- **Next Action:** [the immediate next step]
+
+The SUMMARY must always reference the BLUE hat's conclusion and make it explicit which strategy was chosen and why. If no clear winner exists, state that and provide a decision framework instead."""
 
 # Critical mode — optional analytical enrichment (NOT a personality injection)
 CRITICAL_HATS_PROMPT = """Structure your answer with mandatory hat tags for each section.
@@ -160,7 +171,18 @@ Use `<world_model>` for internal reasoning, then output your answer with:
   ├ CRITICAL: What would a SRE with 10 years EKS experience do? Keep Redis as hot cache + async event fan-out.
 [BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang.
   ├ CRITICAL: Is this the BEST answer? NATS is simpler than Kafka for 10k msg/s, but if traffic spikes to 100k+ Kafka is future-proof.
-Push back on the premise when warranted. Surface the dissenter view."""
+Push back on the premise when warranted. Surface the dissenter view.
+
+**MANDATORY: After completing all hats, output a [SUMMARY] block at the very end.**
+
+[SUMMARY]
+- **Decision Hat:** BLUE (Synthesis)
+- **Selected Strategy:** [the specific option chosen and why]
+- **Key Reason:** [the single most important factor that drove the decision]
+- **Risk Accepted:** [what risk is being taken and why it's worth it]
+- **Next Action:** [the immediate next step]
+
+The SUMMARY must always reference the BLUE hat's conclusion and make it explicit which strategy was chosen and why. If no clear winner exists, state that and provide a decision framework instead."""
 
 LIGHT_PROMPT = GOAL_DETECTION
 MEDIUM_PROMPT = f"{GOAL_DETECTION}\n\n{HATS_PROMPT}"
