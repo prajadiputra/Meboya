@@ -100,7 +100,7 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     c,_ = _detect_complexity(user_message); _state.complexity = c
     _state.hard_break = False
 
-    injection = f"\n\n[Thinking Guide]\n{guide}\n\n{OUTPUT_TEMPLATE}\n[End Guide]"
+    injection = f"\n\n----\nGUIDE: {guide}\nOUTPUT: {OUTPUT_TEMPLATE}\n----"
 
     if MNEMOSYNE_AVAILABLE:
         recalled = _recall(user_message, top_k=2)
@@ -110,7 +110,7 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
                 g = e.get("metadata",{}).get("goal_type","?")
                 entries.append(f"  - Past similar (goal={g}): {e.get('content','')[:120]}")
             if entries:
-                injection += "\n\n[PAST CONTEXT]\n" + "\n".join(entries)
+                injection += "\nPAST: " + "; ".join(entries)
 
     return injection
 
