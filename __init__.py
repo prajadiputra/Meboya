@@ -192,11 +192,9 @@ DEPTH_PROMPTS = {1: LIGHT_PROMPT, 2: MEDIUM_PROMPT, 3: DEEP_PROMPT}
 class _State:
     enabled: bool = True
     depth: int = 3
-    show_markers: bool = True
     last_user_message: str = ""
     last_goal_type: str = "unknown"
     last_complexity: str = "medium"
-    show_trace: bool = True
     critical_mode: bool = True
 
 
@@ -246,10 +244,7 @@ def _on_pre_llm_call(
                     + "\n".join(entries)
                 )
 
-    if _state.show_markers:
-        injection = f"\n\n[Thinking Guide]\n{guide}{recall_block}\n[End Guide]"
-    else:
-        injection = f"\n\n{guide}{recall_block}"
+    injection = f"\n\n{guide}{recall_block}"
 
     logger.debug(
         "meboya: injected depth=%d chars=%d recall=%d mnemosyne=%s",
@@ -356,8 +351,6 @@ def _cmd_meboya(args: str, **_: Any) -> str:
             f"  Enabled: {_state.enabled}\n"
             f"  Depth: {_state.depth} (1=goal, 2=goal+hats, 3=deep+reason_deeper)\n"
             f"  Critical mode: {'🔍 ON' if _state.critical_mode else 'OFF'}\n"
-            f"  Markers: {_state.show_markers}\n"
-            f"  Trace display: {'ON' if _state.show_trace else 'OFF'}\n"
             f"  Mnemosyne: {'✅ connected' if MNEMOSYNE_AVAILABLE else '❌ unavailable'}\n"
             f"  Last complexity: {_state.last_complexity}"
         )
@@ -370,18 +363,6 @@ def _cmd_meboya(args: str, **_: Any) -> str:
         except (IndexError, ValueError):
             pass
         return "Usage: /meboya depth 1|2|3"
-    if a == "markers on":
-        _state.show_markers = True
-        return "🏷️ Markers ON"
-    if a == "markers off":
-        _state.show_markers = False
-        return "🏷️ Markers OFF"
-    if a == "trace on":
-        _state.show_trace = True
-        return "📋 Trace display ON"
-    if a == "trace off":
-        _state.show_trace = False
-        return "📋 Trace display OFF"
     if a == "critical on":
         _state.critical_mode = True
         return "🔍 Critical analysis mode ON (adversarial pushback enabled)"
