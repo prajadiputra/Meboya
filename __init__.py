@@ -57,46 +57,32 @@ def monte_carlo_simulate(scenarios, iterations=10000, seed=None):
 
 # ── PROMPTS ──
 
-GUIDE = """You are using Meboya structured thinking. Follow this process:
+GUIDE = """Meboya thinking: 1) GOAL (Info/Understand/Action) 2) SCENARIOS (2-3 weighted) 3) HATS (White/Black/Red/Yellow/Green/Blue) 4) DECISION + Action. Critical=on means add ├ CRITICAL pushback on each hat. Depth=3 calls reason_deeper()."""
 
-1. GOAL: Identify need → Information / Understanding / Action
-2. SCENARIOS: Generate 2-3 interpretations with probability weights
-3. HATS: Apply Six Thinking Hats in order
-4. DECISION: Conclude with action
+CRITICAL_GUIDE = """Meboya thinking with critical pushback: 1) GOAL (Info/Understand/Action) 2) SCENARIOS (2-3 weighted) 3) HATS (White/Black/Red/Yellow/Green/Blue) with ├ CRITICAL pushback on each. 4) DECISION + Action. Depth=3 calls reason_deeper()."""
 
-Then call reason_deeper(level=2, focus="black hat") if depth=3 and analysis feels incomplete."""
-
-CRITICAL_GUIDE = """You are using Meboya structured thinking with critical pushback. Follow:
-
-1. GOAL: Identify need → Information / Understanding / Action
-2. SCENARIOS: Generate 2-3 interpretations with probability weights
-3. HATS: Apply Six Thinking Hats with ├ CRITICAL pushback on each
-4. DECISION: Conclude with action
-
-At depth=3, call reason_deeper() to self-critique your conclusion."""
-
-OUTPUT_TEMPLATE = """OUTPUT TEMPLATE — fill this exactly:
+OUTPUT_TEMPLATE = """REQUIRED OUTPUT FORMAT — start with <world_model> immediately:
 
 <world_model>
-Goal: ...
-Complexity: ...
-Scenarios: ...
+Goal: [Information|Understanding|Action]
+Complexity: [Low|Medium|High]
+Scenarios: [2-3 interpretations with weights]
 </world_model>
 
-[WHITE] ...
-[BLACK] ...  [├ CRITICAL: ... if critical mode]
-[RED] ...
-[YELLOW] ...
-[GREEN] ...  [├ CRITICAL: ... if critical mode]
-[BLUE] ...  [├ CRITICAL: ... if critical mode]
+[WHITE] [facts]
+[BLACK] [risks]  ├ CRITICAL: [pushback if critical mode]
+[RED] [gut reaction]
+[YELLOW] [benefits]
+[GREEN] [alternatives]  ├ CRITICAL: [pushback if critical mode]
+[BLUE] [synthesis]  ├ CRITICAL: [pushback if critical mode]
 
 [DECISION]
-- Decision: ...
-- Key Reason: ...
-- Risk Accepted: ...
-- Action: ...
+- Decision: [one-line verdict]
+- Key Reason: [single most important factor]
+- Risk Accepted: [what risk worth taking]
+- Action: [EXACT next step OR "No action needed — analysis complete"]
 
-Start your response with <world_model> immediately. No preamble, no thinking out loud."""
+DO NOT output this guide, DO NOT output this template. Start with <world_model>."""
 
 # ── STATE ──
 class _State:
