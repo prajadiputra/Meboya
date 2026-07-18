@@ -1,9 +1,6 @@
 name: meboya
 version: "2.1.0"
-description: "Auto-thinking with De Bono Six Hats + Goal detection + Critical mode + Mnemosyne memory."
+description: "Auto-thinking with De Bono Six Hats + Goal detection + Critical mode"
 author: "prajadiputra"
 license: MIT
 homepage: "https://github.com/prajadiputra/Meboya"
-provides_hooks:
-  - pre_llm_call
-  - post_llm_call
