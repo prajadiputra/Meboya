@@ -71,7 +71,7 @@ _state = _State()
 def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     if not _state.enabled: return None
     _state.last_msg = user_message
-    if len(user_message.strip())<15 and not is_first_turn: return None
+    if len(user_message.strip()) < 5 and not is_first_turn: return None
     guide = CRITICAL_INSTRUCTION if _state.critical else INSTRUCTION
     c,_ = _detect_complexity(user_message); _state.complexity = c
     _state.hard_break = False
