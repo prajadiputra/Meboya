@@ -172,13 +172,13 @@ DEPTH_PROMPTS = {1: LIGHT_PROMPT, 2: MEDIUM_PROMPT, 3: DEEP_PROMPT}
 
 class _State:
     enabled: bool = True
-    depth: int = 2
+    depth: int = 3
     show_markers: bool = True
     last_user_message: str = ""
     last_goal_type: str = "unknown"
     last_complexity: str = "medium"
     show_trace: bool = True
-    critical_mode: bool = False
+    critical_mode: bool = True
 
 
 _state = _State()
