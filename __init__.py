@@ -5,10 +5,8 @@ An auto-thinking plugin for Hermes Agent that injects structured prompts
 with optional Mnemosyne memory recall and write. Zero hard dependencies.
 
 Hooks:
-  pre_llm_call            → inject thinking guide + trace context
+  pre_llm_call            → inject thinking guide (no visible wrapper)
   post_llm_call           → save goal pattern to Mnemosyne
-
-Compatible with Hermes Agent. Falls back gracefully if Mnemosyne is missing.
 """
 
 from __future__ import annotations
@@ -26,26 +24,15 @@ logger = logging.getLogger(__name__)
 MNEMOSYNE_AVAILABLE = False
 _mnemosyne = None
 
-# Try newer API path first (mnemosyne-memory 3.12+)
 try:
-    from mnemosyne.core.memory import MemoryStream  # noqa: F401
-    _mnemosyne = None
-    del MemoryStream
+    from mnemosyne import Mnemosyne
+    _mnemosyne = Mnemosyne()
+    MNEMOSYNE_AVAILABLE = True
+    logger.info("meboya: Mnemosyne connected")
 except ImportError:
-    pass
-
-# Fall back to legacy Mnemosyne class (mnemosyne-memory 3.7–3.11)
-if not MNEMOSYNE_AVAILABLE:
-    try:
-        from mnemosyne import Mnemosyne
-
-        _mnemosyne = Mnemosyne()
-        MNEMOSYNE_AVAILABLE = True
-        logger.info("meboya: Mnemosyne connected")
-    except ImportError:
-        logger.debug("meboya: mnemosyne not installed (graceful fallback)")
-    except Exception as e:
-        logger.warning("meboya: mnemosyne init failed: %s", e)
+    logger.debug("meboya: mnemosyne not installed (graceful fallback)")
+except Exception as e:
+    logger.warning("meboya: mnemosyne init failed: %s", e)
 
 
 def _remember(content: str, importance: float = 0.7, source: str = "meboya",
@@ -73,7 +60,7 @@ def _recall(query: str, top_k: int = 3) -> List[Dict]:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Goal detection (matches standard Meboya/DOGA regex pattern)
+# Goal detection
 # ──────────────────────────────────────────────────────────────────────
 
 _GOAL_RE = re.compile(
@@ -88,7 +75,6 @@ def _detect_goal_type(text: str) -> str:
 
 
 def _detect_complexity(text: str) -> Tuple[str, int]:
-    """Heuristic — Meboya adds this on top of the standard approach."""
     low = sum(kw in text.lower() for kw in (
         "simple", "trivial", "what is", "who is", "when is", "define",
         "ls ", "cat ", "find ", "grep "))
@@ -114,6 +100,7 @@ GOAL_DETECTION = """Before answering, briefly identify what the user's primary n
 
 Choose the dominant goal and let it shape your response."""
 
+# ONE-SHOT: model compliance naik drastis dengan contoh eksplisit
 HATS_PROMPT = """Structure your answer with mandatory hat tags for each section.
 
 Use `<world_model>` for internal reasoning, then output your answer with:
@@ -131,18 +118,17 @@ Use `<world_model>` for internal reasoning, then output your answer with:
 [GREEN] Alternative: keep Redis for caching + SQL for events with Debezium CDC as stepping stone before full EDA.
 [BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang.
 
-**MANDATORY: After completing all hats, output a [SUMMARY] block at the very end.**
+**MANDATORY: After [BLUE], output a [DECISION] block that DECLARES the action and THEN EXECUTES it.**
 
-[SUMMARY]
-- **Decision Hat:** BLUE (Synthesis)
-- **Selected Strategy:** [the specific option chosen and why]
-- **Key Reason:** [the single most important factor that drove the decision]
-- **Risk Accepted:** [what risk is being taken and why it's worth it]
-- **Next Action:** [the immediate next step]
+[DECISION]
+- **Decision:** [one-line verdict — the chosen strategy]
+- **Key Reason:** [single most important factor]
+- **Risk Accepted:** [what risk is worth taking]
+- **Action:** [EXACT next step the agent will take NOW — a command, file edit, or delegation. If this is informational, state "No action needed — analysis complete."]
 
-The SUMMARY must always reference the BLUE hat's conclusion and make it explicit which strategy was chosen and why. If no clear winner exists, state that and provide a decision framework instead."""
+After [DECISION], if Action is a concrete step, EXECUTE IT IMMEDIATELY using available tools. Do not ask permission. If the user's request was informational only, end with the analysis."""
 
-# Critical mode — optional analytical enrichment (NOT a personality injection)
+# Critical mode — adversarial pushback
 CRITICAL_HATS_PROMPT = """Structure your answer with mandatory hat tags for each section.
 
 Use `<world_model>` for internal reasoning, then output your answer with:
@@ -164,44 +150,38 @@ Use `<world_model>` for internal reasoning, then output your answer with:
 
 **Example output format:**
 [WHITE] The request involves migrating from shared state Redis/SQL to EDA in EKS. Key factors: high-concurrency environment, existing Redis/SQL bottleneck.
-[BLACK] Eventual consistency introduces complexity. Rollback strategy must be redesigned. Consumer lag in high-concurrency can cause data staleness.
+[BLACK] Eventual consistency introduces complexity. Rollback strategy must be redesigned.
   ├ CRITICAL: Is the "high concurrency" requirement quantified? What QPS are we talking about?
 [YELLOW] Decoupling enables independent scaling per service. NATS/Kafka throughput exceeds shared DB by 10-100x.
 [GREEN] Alternative: keep Redis for caching + SQL for events with Debezium CDC as stepping stone before full EDA.
   ├ CRITICAL: What would a SRE with 10 years EKS experience do? Keep Redis as hot cache + async event fan-out.
 [BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang.
   ├ CRITICAL: Is this the BEST answer? NATS is simpler than Kafka for 10k msg/s, but if traffic spikes to 100k+ Kafka is future-proof.
-Push back on the premise when warranted. Surface the dissenter view.
 
-**MANDATORY: After completing all hats, output a [SUMMARY] block at the very end.**
+**MANDATORY: After [BLUE], output a [DECISION] block that DECLARES the action and THEN EXECUTES it.**
 
-[SUMMARY]
-- **Decision Hat:** BLUE (Synthesis)
-- **Selected Strategy:** [the specific option chosen and why]
-- **Key Reason:** [the single most important factor that drove the decision]
-- **Risk Accepted:** [what risk is being taken and why it's worth it]
-- **Next Action:** [the immediate next step]
+[DECISION]
+- **Decision:** [one-line verdict — the chosen strategy]
+- **Key Reason:** [single most important factor]
+- **Risk Accepted:** [what risk is worth taking]
+- **Action:** [EXACT next step the agent will take NOW — a command, file edit, or delegation. If this is informational, state "No action needed — analysis complete."]
 
-The SUMMARY must always reference the BLUE hat's conclusion and make it explicit which strategy was chosen and why. If no clear winner exists, state that and provide a decision framework instead."""
+After [DECISION], if Action is a concrete step, EXECUTE IT IMMEDIATELY using available tools. Do not ask permission. If the user's request was informational only, end with the analysis.
+
+Push back on the premise when warranted. Surface the dissenter view."""
 
 LIGHT_PROMPT = GOAL_DETECTION
 MEDIUM_PROMPT = f"{GOAL_DETECTION}\n\n{HATS_PROMPT}"
 DEEP_PROMPT = f"""{GOAL_DETECTION}
 
-{HATS_PROMPT}
-
-After synthesis, call `reason_deeper` tool if analysis feels incomplete
-(focus: "black hat cascade", "yellow hat assumptions", "green hat gaps")."""
+{HATS_PROMPT}"""
 
 CRITICAL_DEPTH_PROMPTS = {
     1: GOAL_DETECTION,
     2: f"{GOAL_DETECTION}\n\n{CRITICAL_HATS_PROMPT}",
     3: f"""{GOAL_DETECTION}
 
-{CRITICAL_HATS_PROMPT}
-
-After synthesis, call `reason_deeper` tool if analysis feels incomplete
-(focus: 'second-order effects', 'opposing viewpoint', 'premise validity').""",
+{CRITICAL_HATS_PROMPT}""",
 }
 
 DEPTH_PROMPTS = {1: LIGHT_PROMPT, 2: MEDIUM_PROMPT, 3: DEEP_PROMPT}
@@ -233,7 +213,10 @@ def _on_pre_llm_call(
     is_first_turn: bool = False,
     **_: Any,
 ) -> Optional[str]:
-    """Inject the Meboya thinking guide before the LLM sees the prompt."""
+    """Inject the Meboya thinking guide before the LLM sees the prompt.
+    
+    NO visible wrapper markers — guide content injects directly.
+    """
     if not _state.enabled:
         return None
 
@@ -246,11 +229,14 @@ def _on_pre_llm_call(
     if _state.critical_mode:
         critical_level = _state.depth
         guide = CRITICAL_DEPTH_PROMPTS.get(critical_level, CRITICAL_DEPTH_PROMPTS[2])
+
     c_label, c_score = _detect_complexity(user_message)
     _state.last_complexity = c_label
 
-    # Inject relevant past goal patterns from Mnemosyne (silent — no visible block)
-    recall_block = ""
+    # Build injection — guide only, no wrappers
+    injection = f"\n\n{guide}"
+
+    # Silent Mnemosyne recall (no visible block)
     if MNEMOSYNE_AVAILABLE:
         recalled = _recall(user_message, top_k=2)
         if recalled:
@@ -260,70 +246,16 @@ def _on_pre_llm_call(
                 goal = entry.get("metadata", {}).get("goal_type", "?")
                 entries.append(f"  - Past similar query (goal={goal}): {content[:120]}")
             if entries:
-                recall_block = (
+                injection += (
                     "\n\nYou have seen similar queries before:\n"
                     + "\n".join(entries)
                 )
 
-    injection = f"\n\n{guide}{recall_block}"
-
     logger.debug(
-        "meboya: injected depth=%d chars=%d recall=%d mnemosyne=%s",
-        _state.depth, len(injection), 1 if recall_block else 0, MNEMOSYNE_AVAILABLE,
+        "meboya: injected depth=%d chars=%d mnemosyne=%s",
+        _state.depth, len(injection), MNEMOSYNE_AVAILABLE,
     )
     return injection
-
-
-# ──────────────────────────────────────────────────────────────────────
-# post_llm_call hook — save goal pattern to Mnemosyne
-# ──────────────────────────────────────────────────────────────────────
-
-_WORLD_MODEL_RE = re.compile(
-    r"<world_model>\s*(.*?)\s*</world_model>",
-    re.DOTALL | re.IGNORECASE,
-)
-
-
-def _extract_world_model(text: str) -> Tuple[List[str], str]:
-    """Extract <world_model>...</world_model> blocks (returns blocks, remaining)."""
-    blocks: List[str] = []
-    remaining = text
-    while True:
-        match = _WORLD_MODEL_RE.search(remaining)
-        if not match:
-            break
-        blocks.append(match.group(1).strip())
-        remaining = remaining[:match.start()] + remaining[match.end():]
-    return blocks, remaining.strip()
-
-
-def _format_thinking_panel(blocks: List[str]) -> str:
-    """Format world_model blocks into a clean Meboya panel."""
-    non_empty = [b for b in blocks if b.strip()]
-    if not non_empty:
-        return ""
-    lines = ["[MEBOYA: Telaah Proses]"]
-    lines.append("   " + "=" * 50)
-    for i, block in enumerate(non_empty, 1):
-        if i > 1:
-            lines.append("")
-            lines.append("   . . . . . . . . . . . . . . . . . . . . . . . . . .")
-            lines.append("")
-        for line in block.strip().split("\n"):
-            lines.append(f"   {line}")
-    lines.append("")
-    lines.append("   " + "=" * 50)
-    return "\n".join(lines)
-
-
-_HAT_TAGS = re.compile(r'\[(WHITE|RED|BLACK|YELLOW|GREEN|BLUE)\]', re.IGNORECASE)
-
-
-def _detect_active_hats(text: str) -> List[str]:
-    """Detect which hat tags appear in the response text."""
-    return list(dict.fromkeys(
-        m.group(1).lower() for m in _HAT_TAGS.finditer(text)
-    ))
 
 
 def _on_post_llm_call(
@@ -335,7 +267,6 @@ def _on_post_llm_call(
     if not _state.enabled or not response_text:
         return
 
-    # Detect goal from response (works if model outputs <world_model> tags)
     if _state.last_user_message:
         goal_type = _detect_goal_type(response_text)
         c_label, c_score = _detect_complexity(_state.last_user_message)
@@ -404,12 +335,12 @@ def _cmd_meboya(args: str, **_: Any) -> str:
         return "\n".join(lines)
 
     return (
-        "Usage: /meboya [on|off|status|depth 1-3|markers on|off|trace on|off|critical on|off|recall]\n"
+        "Usage: /meboya [on|off|status|depth 1-3|critical on|off|recall]\n"
         "  depth 1 = goal only\n"
         "  depth 2 = goal + hats (default)\n"
-        "  depth 3 = depth 2 + reason_deeper\n"
-        "  trace on|off = show/hide thinking trace in response\n"
-        "  critical on|off = toggle adversarial pushback reasoning"
+        "  depth 3 = goal + hats + critical pushback\n"
+        "  critical on|off = toggle adversarial pushback reasoning\n"
+        "  recall = show past goal patterns from Mnemosyne"
     )
 
 
@@ -423,10 +354,10 @@ def register(ctx):
     ctx.register_command(
         name="meboya",
         handler=_cmd_meboya,
-        description="Configure Meboya (on/off/status/depth/recall/critical)",
-        args_hint="[on|off|status|depth 1-3|markers on|off|trace on|off|critical on|off|recall]",
+        description="Configure Meboya (on/off/status/depth/critical/recall)",
+        args_hint="[on|off|status|depth 1-3|critical on|off|recall]",
     )
     logger.info(
-        "meboya plugin registered (depth=%d, mnemosyne=%s, transform_hook=removed)",
-        _state.depth, MNEMOSYNE_AVAILABLE,
+        "meboya plugin registered (depth=%d, critical=%s, mnemosyne=%s)",
+        _state.depth, _state.critical_mode, MNEMOSYNE_AVAILABLE,
     )
