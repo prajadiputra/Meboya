@@ -146,16 +146,13 @@ Response delivered to user (with 💡 trace prefix)
 
 ---
 
-## Comparison: Meboya vs DOGA
+## Origin
 
-| Aspect | DOGA | Meboya |
-|--------|------|--------|
-| **Dependencies** | `mnemosyne-hermes` required | Pure stdlib, optional Mnemosyne |
-| **Crash resilience** | Fragile | Graceful fallback |
-| **Thinking structure** | 5 De Bono hats | 6 hats + Critical mode |
-| **Goal detection** | Regex only | Regex + complexity heuristic |
-| **Trace visibility** | Only with `<world_model>` | Always visible |
-| **Maintainer** | Stale (May 2026) | Active |
+Meboya is inspired by **DOGA** — the original probabilistic thinking layer plugin by [0z1-ghb](https://github.com/0z1-ghb/doga-hermes). It was rewritten from scratch with different design priorities:
+- Pure stdlib, zero hard dependencies
+- Graceful fallback (no crashes)
+- Six Thinking Hats + Critical mode
+- Always-visible trace markers
 
 ---
 
