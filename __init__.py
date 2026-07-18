@@ -114,7 +114,7 @@ def _cmd(a="", **_):
     if a=="on": _state.enabled=True; return "ON"
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
-        return (f"Meboya v2.5.1\n"
+        return (f"Meboya v2.5.3\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
                 f"  Critical: {'ON' if _state.critical else 'OFF'}\n"
@@ -153,4 +153,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.5.1 loaded (DOGA-style)")
+    logger.info("meboya v2.5.3 loaded (DOGA-style)")
