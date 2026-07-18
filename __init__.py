@@ -1,24 +1,24 @@
 """Meboya — Balinese for "questioning everything".
 
-An auto-thinking plugin for Hermes Agent that injects structured prompts
-(Goal Detection + Six Thinking Hats + Critical Mode) before each LLM call,
-with optional Mnemosyne memory recall and write. Zero hard dependencies.
-
-Hooks:
-  pre_llm_call            → inject thinking guide (no visible wrapper)
-  post_llm_call           → save goal pattern to Mnemosyne
+Auto-thinking plugin for Hermes Agent.
+Injects structured reasoning: Goal Detection + Scenario Generation + Six Thinking Hats
++ Critical Mode + Monte Carlo simulation + Recursive Reasoning (reason_deeper).
+Optional Mnemosyne memory. Zero hard dependencies (stdlib Python).
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import math
+import random
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────
-# Optional Mnemosyne (silent fallback if missing)
+# Optional Mnemosyne
 # ──────────────────────────────────────────────────────────────────────
 
 MNEMOSYNE_AVAILABLE = False
@@ -40,7 +40,7 @@ def _remember(content: str, importance: float = 0.7, source: str = "meboya",
     if not MNEMOSYNE_AVAILABLE or not _mnemosyne:
         return None
     try:
-        kwargs = {"content": content, "importance": importance, "source": source}
+        kwargs: Any = {"content": content, "importance": importance, "source": source}
         if metadata:
             kwargs["metadata"] = metadata
         return _mnemosyne.remember(**kwargs)
@@ -76,8 +76,7 @@ def _detect_goal_type(text: str) -> str:
 
 def _detect_complexity(text: str) -> Tuple[str, int]:
     low = sum(kw in text.lower() for kw in (
-        "simple", "trivial", "what is", "who is", "when is", "define",
-        "ls ", "cat ", "find ", "grep "))
+        "simple", "trivial", "what is", "who is", "when is", "define"))
     high = sum(kw in text.lower() for kw in (
         "deploy", "architecture", "optimize", "refactor", "migrate",
         "security", "incident", "cost", "troubleshoot", "latency", "scale"))
@@ -89,124 +88,146 @@ def _detect_complexity(text: str) -> Tuple[str, int]:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Prompt templates
+# Monte Carlo — pure Python, 0 LLM tokens
 # ──────────────────────────────────────────────────────────────────────
 
-GOAL_DETECTION = """Before answering, briefly identify what the user's primary need is:
+def monte_carlo_simulate(
+    scenarios: List[Tuple[str, float]],
+    iterations: int = 10000,
+    seed: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Run Monte Carlo simulation over weighted scenarios.
 
-- **Information**: They want factual data, analysis, or explanation.
-- **Understanding**: They want to feel heard, validated, or understood.
-- **Action**: They want a decision, recommendation, or next step.
+    scenarios: list of (label, probability_weight) tuples. Weights are
+               relative — normalised to sum to 1.0 internally.
+    iterations: number of simulation runs (default 10000, range 1000-50000).
+    seed: optional RNG seed for reproducibility.
 
-Choose the dominant goal and let it shape your response."""
+    Returns dict with:
+      - probabilities: {label: final_probability}
+      - winner: label with highest probability
+      - confidence: spread between highest and second-highest
+      - iterations: actual iterations run
+      - raw_counts: {label: integer count}
+    """
+    if not scenarios:
+        return {"error": "no scenarios provided", "winner": "none"}
+    actual_iters = max(1000, min(iterations, 50000))
+    weights = [max(s[1], 0.01) for s in scenarios]
+    total_w = sum(weights)
+    probs = [w / total_w for w in weights]
+    labels = [s[0] for s in scenarios]
 
-# ONE-SHOT: model compliance naik drastis dengan contoh eksplisit
-HATS_PROMPT = """Output your answer using the exact template below. Replace the bracketed placeholders with your actual analysis.
+    rng = random.Random(seed) if seed else random.Random()
+    counts = [0] * len(labels)
+    for _ in range(actual_iters):
+        r = rng.random()
+        cumulative = 0.0
+        for i, p in enumerate(probs):
+            cumulative += p
+            if r <= cumulative:
+                counts[i] += 1
+                break
 
-<world_model>
-Goal: [Information / Understanding / Action]
-Complexity: [Low / Medium / High]
-</world_model>
+    final_probs = [c / actual_iters for c in counts]
+    indexed = sorted(enumerate(final_probs), key=lambda x: -x[1])
+    winner_idx = indexed[0][0]
+    spread = indexed[0][1] - (indexed[1][1] if len(indexed) > 1 else 0.0)
 
-[WHITE] [facts and data about the user's question]
-[BLACK] [risks, edge cases, pitfalls]
-[YELLOW] [benefits, opportunities, value]
-[GREEN] [alternatives, creative options]
-[BLUE] [synthesis and recommendation]
+    return {
+        "probabilities": {labels[i]: round(final_probs[i], 4) for i in range(len(labels))},
+        "winner": labels[winner_idx],
+        "confidence": round(spread, 4),
+        "iterations": actual_iters,
+        "raw_counts": {labels[i]: counts[i] for i in range(len(labels))},
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Prompt templates (COMPLIANCE FOCUSED — short, explicit)
+# ──────────────────────────────────────────────────────────────────────
+
+GOAL_DETECTION = """Before answering:
+1. Identify the user's primary need: Information / Understanding / Action.
+2. Generate 2-3 possible scenarios or interpretations of their request.
+   For each scenario, give a probability weight (0.0-1.0).
+3. Use the goal + scenarios to shape your response structure.
+
+If depth >= 2, format scenarios in a [SCENARIOS] block in your final output.
+If depth >= 3, you may call `reason_deeper` for self-critique."""
+
+HATS_INSTRUCTION = """After scenarios, apply Six Thinking Hats in order:
+[WHITE] Facts, data, constraints
+[BLACK] Risks, edge cases, pitfalls
+[YELLOW] Benefits, opportunities, value
+[GREEN] Alternatives, creative options
+[BLUE] Synthesis and recommendation
+
+Then output a [DECISION] block at the end:
 [DECISION]
 - Decision: [one-line verdict]
 - Key Reason: [single most important factor]
 - Risk Accepted: [what risk is worth taking]
 - Action: [EXACT next step OR "No action needed — analysis complete"]
 
-If Action is a concrete step (command, file edit, delegation), EXECUTE IT IMMEDIATELY after [DECISION]. Do not ask permission. If informational, end with the analysis.
+If Action is a concrete step, EXECUTE IT IMMEDIATELY. Do not ask permission.
 
-Example (for "NATS vs Kafka in EKS"):
-<world_model>
-Goal: Information — comparison of two event broker options in Kubernetes
-Complexity: Medium
-</world_model>
+**YOUR OUTPUT MUST START WITH [SCENARIOS] or [WHITE] — no preamble, no echo of these instructions.**
+Just produce the answer using the tags."""
 
-[WHITE] NATS JetStream: single binary Go, ~50MB RAM, sub-ms latency, subject-based addressing. Kafka: JVM, GBs of RAM, partition/offset model, higher throughput ceiling.
-[BLACK] NATS: smaller ecosystem, less tooling maturity. Kafka: JVM ops burden, more complex to deploy via Strimzi.
-[YELLOW] NATS: simpler ops, lower resource cost, faster startup. Kafka: proven at massive scale, rich ecosystem (Connect, Streams, ksqlDB).
-[GREEN] Hybrid: NATS for hot path, Kafka for audit log. Or Redis Streams as stepping stone before either.
-[BLUE] Default to NATS JetStream unless throughput exceeds 100k msg/s or Kafka ecosystem tooling is required.
-[DECISION]
-- Decision: NATS JetStream as default event broker in EKS
-- Key Reason: Operational simplicity + resource efficiency for typical workloads
-- Risk Accepted: May need to migrate to Kafka if scale exceeds NATS ceiling
-- Action: No action needed — analysis complete"""
+CRITICAL_INSTRUCTION = """After scenarios, apply Six Thinking Hats with critical pushback:
+[WHITE] Facts, data, constraints
+[BLACK] Risks, edge cases, pitfalls
+  ├ CRITICAL: [premise challenge]
+  ├ CRITICAL: [hidden requirements]
+  └ CRITICAL: [worst-case path]
+[RED] Gut reaction
+[YELLOW] Benefits, opportunities, value
+[GREEN] Alternatives, creative options
+  ├ CRITICAL: [opposite approach]
+  └ CRITICAL: [domain expert view]
+[BLUE] Synthesis and recommendation
+  ├ CRITICAL: [best answer or just easiest?]
+  └ CRITICAL: [second-order effects]
 
-# Critical mode — adversarial pushback
-CRITICAL_HATS_PROMPT = """Output your answer using the exact template below. Replace the bracketed placeholders with your actual analysis.
-
-<world_model>
-Goal: [Information / Understanding / Action]
-Complexity: [Low / Medium / High]
-</world_model>
-
-[WHITE] [facts and data about the user's question]
-[BLACK] [risks, edge cases, pitfalls]
-  ├ CRITICAL: [premise challenge — is the user's assumption valid?]
-  ├ CRITICAL: [what is the user NOT saying?]
-  └ CRITICAL: [worst-case path if this approach fails]
-[RED] [gut reaction — what feels off or uncertain?]
-[YELLOW] [benefits, opportunities, value]
-[GREEN] [alternatives, creative options]
-  ├ CRITICAL: [what is the OPPOSITE approach?]
-  └ CRITICAL: [what would a domain expert do differently?]
-[BLUE] [synthesis and recommendation]
-  ├ CRITICAL: [is this the BEST answer or just the easiest?]
-  └ CRITICAL: [are second-order effects accounted for?]
+Then output [DECISION] block:
 [DECISION]
 - Decision: [one-line verdict]
 - Key Reason: [single most important factor]
 - Risk Accepted: [what risk is worth taking]
 - Action: [EXACT next step OR "No action needed — analysis complete"]
 
-If Action is a concrete step (command, file edit, delegation), EXECUTE IT IMMEDIATELY after [DECISION]. Do not ask permission. If informational, end with the analysis.
-
-Example (for "NATS vs Kafka in EKS"):
-<world_model>
-Goal: Action — choose event broker for new EKS service
-Complexity: Medium
-</world_model>
-
-[WHITE] NATS: single binary, ~50MB, sub-ms latency. Kafka: JVM, >6GB RAM, higher throughput ceiling. Current workload ~25k msg/s.
-[BLACK] NATS ecosystem maturity risk. Kafka: higher ops overhead, Strimzi complexity.
-  ├ CRITICAL: Is 25k msg/s projected to grow? Non-functional requirements undefined.
-  ├ CRITICAL: Team skill not disclosed — Kafka expertise available?
-  └ CRITICAL: If NATS fails during peak, no fallback path?
-[RED] NATS feels lighter for team size, but Kafka feels safer for future scale.
-[YELLOW] NATS: faster delivery, simpler debugging. Kafka: industry standard, easier to hire for.
-[GREEN] Hybrid: NATS for real-time path, Kafka for audit sink. Or skip NATS and use Kafka from day 1.
-  ├ CRITICAL: Opposite approach: commit to Kafka now despite overhead — fewer future migrations.
-  └ CRITICAL: Domain expert: "Use NATS if <50k msg/s and team <5, else Kafka."
-[BLUE] Start with NATS JetStream given current load/team size. Add Kafka connector for audit sink when needed.
-  ├ CRITICAL: This is the best answer for current constraints, but revisit in 6 months.
-  └ CRITICAL: Second-order: NATS-to-Kafka migration cost is lower than maintaining Kafka from day 1.
-[DECISION]
-- Decision: NATS JetStream as primary, Kafka connector for audit only
-- Key Reason: Operational simplicity matches current team size and throughput (25k msg/s)
-- Risk Accepted: Migration risk if workload exceeds 100k msg/s
-- Action: No action needed — analysis complete"""
+**CRITICAL: If depth=3, call `reason_deeper` after [DECISION] to critique your own conclusion.**
+**YOUR OUTPUT MUST START WITH [SCENARIOS] or [WHITE] — no preamble, no echo of instructions.**"""
 
 LIGHT_PROMPT = GOAL_DETECTION
-MEDIUM_PROMPT = f"{GOAL_DETECTION}\n\n{HATS_PROMPT}"
+MEDIUM_PROMPT = f"{GOAL_DETECTION}\n\n{HATS_INSTRUCTION}"
 DEEP_PROMPT = f"""{GOAL_DETECTION}
 
-{HATS_PROMPT}"""
+{HATS_INSTRUCTION}
 
-CRITICAL_DEPTH_PROMPTS = {
-    1: GOAL_DETECTION,
-    2: f"{GOAL_DETECTION}\n\n{CRITICAL_HATS_PROMPT}",
-    3: f"""{GOAL_DETECTION}
+After [DECISION], evaluate whether your conclusion needs deeper critique:
+- If the problem is complex, call `reason_deeper(level=2, focus="black hat")`
+- If confidence is low, call `reason_deeper(level=3, focus="green hat")`
+- If you see strong objections you didn't address, call `reason_deeper(level=2, focus="red hat")`
 
-{CRITICAL_HATS_PROMPT}""",
-}
+reason_deeper will run additional Monte Carlo simulation and return a refined view."""
+
+CRITICAL_LIGHT = f"{GOAL_DETECTION}\n\n{CRITICAL_INSTRUCTION}"
+CRITICAL_MEDIUM = f"{GOAL_DETECTION}\n\n{CRITICAL_INSTRUCTION}"
+CRITICAL_DEEP = f"""{GOAL_DETECTION}
+
+{CRITICAL_INSTRUCTION}
+
+After [DECISION], evaluate whether your conclusion needs deeper critique:
+- If the problem is complex, call `reason_deeper(level=2, focus="black hat")`
+- If confidence is low, call `reason_deeper(level=3, focus="green hat")`
+- If you see strong objections you didn't address, call `reason_deeper(level=2, focus="red hat")`
+
+reason_deeper will run additional Monte Carlo simulation and return a refined view."""
 
 DEPTH_PROMPTS = {1: LIGHT_PROMPT, 2: MEDIUM_PROMPT, 3: DEEP_PROMPT}
+CRITICAL_DEPTH_PROMPTS = {1: CRITICAL_LIGHT, 2: CRITICAL_MEDIUM, 3: CRITICAL_DEEP}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -220,6 +241,11 @@ class _State:
     last_goal_type: str = "unknown"
     last_complexity: str = "medium"
     critical_mode: bool = True
+    # reason_deeper tracking
+    reason_deeper_calls: int = 0
+    reason_deeper_ignored: int = 0
+    hard_break_triggered: bool = False
+    monte_carlo_default_iters: int = 10000
 
 
 _state = _State()
@@ -235,10 +261,6 @@ def _on_pre_llm_call(
     is_first_turn: bool = False,
     **_: Any,
 ) -> Optional[str]:
-    """Inject the Meboya thinking guide before the LLM sees the prompt.
-    
-    NO visible wrapper markers — guide content injects directly.
-    """
     if not _state.enabled:
         return None
 
@@ -252,13 +274,13 @@ def _on_pre_llm_call(
         critical_level = _state.depth
         guide = CRITICAL_DEPTH_PROMPTS.get(critical_level, CRITICAL_DEPTH_PROMPTS[2])
 
-    c_label, c_score = _detect_complexity(user_message)
+    c_label, _ = _detect_complexity(user_message)
     _state.last_complexity = c_label
 
-    # Build injection — guide with [Thinking Guide] wrapper + explicit output instruction
-    injection = f"\n\n[Thinking Guide]\n{guide}\n\nNow produce your answer with the hat tags and [DECISION] block as instructed above.\n[End Guide]"
+    # Build injection — short intro + guide
+    injection = f"\n\n[Thinking Guide]\n{guide}\n[End Guide]"
 
-    # Mnemosyne recall with [PAST CONTEXT] block
+    # Mnemosyne recall
     if MNEMOSYNE_AVAILABLE:
         recalled = _recall(user_message, top_k=2)
         if recalled:
@@ -270,9 +292,12 @@ def _on_pre_llm_call(
             if entries:
                 injection += (
                     "\n\n[PAST CONTEXT — these were user goals for similar past queries. "
-                    "Use this to calibrate your response approach.]\n"
+                    "Use this to calibrate.]\n"
                     + "\n".join(entries)
                 )
+
+    # Hard-break reset per user message
+    _state.hard_break_triggered = False
 
     logger.debug(
         "meboya: injected depth=%d chars=%d mnemosyne=%s",
@@ -286,10 +311,8 @@ def _on_post_llm_call(
     user_message: str = "",
     **_: Any,
 ) -> None:
-    """Save goal pattern to Mnemosyne after LLM response."""
     if not _state.enabled or not response_text:
         return
-
     if _state.last_user_message:
         goal_type = _detect_goal_type(response_text)
         c_label, c_score = _detect_complexity(_state.last_user_message)
@@ -305,6 +328,81 @@ def _on_post_llm_call(
             },
         )
         _state.last_goal_type = goal_type
+
+    # Detect if model ignored reason_deeper (response doesn't mention it)
+    if _state.reason_deeper_calls > 0 and "reason_deeper" not in response_text:
+        _state.reason_deeper_ignored += 1
+        logger.debug("meboya: reason_deeper ignored #%d", _state.reason_deeper_ignored)
+        if _state.reason_deeper_ignored >= 3:
+            _state.hard_break_triggered = True
+            logger.warning("meboya: HARD BREAK — reason_deeper ignored 3 times, auto-stopped")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# reason_deeper tool — recursive self-critique
+# ──────────────────────────────────────────────────────────────────────
+
+def reason_deeper(
+    level: int = 2,
+    focus: str = "black hat",
+    scenarios: Optional[str] = None,
+    **_: Any,
+) -> str:
+    """Recursive self-critique tool. Call to deepen analysis on a specific lens.
+
+    Args:
+        level: critique depth (2=medium, 3=deep)
+        focus: which hat lens to focus ("black hat", "green hat", "red hat", "blue hat")
+        scenarios: optional JSON list of scenarios for Monte Carlo
+
+    Returns:
+        Formatted critique text.
+    """
+    if _state.hard_break_triggered:
+        return (
+            "[reason_deeper BLOCKED: hard-break active. "
+            "You have ignored reason_deeper 3 times. "
+            "Proceed to final answer without further recursion.]"
+        )
+
+    _state.reason_deeper_calls += 1
+
+    # Map hat lens to critique angle
+    focus_map = {
+        "black hat": "What did you miss? What worst-case scenario wasn't weighed?",
+        "green hat": "What creative alternative did you dismiss too quickly?",
+        "red hat": "What gut feeling did you suppress? What uncertainty remains?",
+        "blue hat": "Is the decision framework itself sound? What's the meta-view?",
+        "white hat": "What facts or data might be missing or outdated?",
+        "yellow hat": "What upside did you undervalue?",
+    }
+    question = focus_map.get(focus, focus_map["black hat"])
+
+    # Run Monte Carlo if scenarios provided
+    mc_result = ""
+    if scenarios:
+        try:
+            parsed = json.loads(scenarios)
+            if isinstance(parsed, list) and all(isinstance(s, list) and len(s) == 2 for s in parsed):
+                sim_result = monte_carlo_simulate(
+                    [(s[0], s[1]) for s in parsed],
+                    iterations=_state.monte_carlo_default_iters * level,
+                )
+                mc_result = f"\n\nMonte Carlo ({sim_result['iterations']} iters):\n"
+                for label, prob in sorted(
+                    sim_result["probabilities"].items(), key=lambda x: -x[1]
+                ):
+                    mc_result += f"  {label}: {prob*100:.1f}%\n"
+                mc_result += f"Winner: {sim_result['winner']} (confidence: {sim_result['confidence']*100:.1f}%)"
+        except (json.JSONDecodeError, TypeError):
+            mc_result = "\n\n(Monte Carlo simulation not run — invalid scenario format)"
+
+    return (
+        f"[reason_deeper level={level}, focus={focus}]\n"
+        f"Critique: {question}\n"
+        f"{mc_result}\n"
+        f"[end reason_deeper]"
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -324,10 +422,14 @@ def _cmd_meboya(args: str, **_: Any) -> str:
         return (
             f"📊 Meboya status:\n"
             f"  Enabled: {_state.enabled}\n"
-            f"  Depth: {_state.depth} (1=goal, 2=goal+hats, 3=deep+reason_deeper)\n"
+            f"  Depth: {_state.depth} (1-3)\n"
             f"  Critical mode: {'🔍 ON' if _state.critical_mode else 'OFF'}\n"
             f"  Mnemosyne: {'✅ connected' if MNEMOSYNE_AVAILABLE else '❌ unavailable'}\n"
-            f"  Last complexity: {_state.last_complexity}"
+            f"  Last complexity: {_state.last_complexity}\n"
+            f"  reason_deeper calls: {_state.reason_deeper_calls}\n"
+            f"  reason_deeper ignored: {_state.reason_deeper_ignored}\n"
+            f"  Hard-break: {'⚠️ ACTIVE' if _state.hard_break_triggered else 'off'}\n"
+            f"  Monte Carlo default iters: {_state.monte_carlo_default_iters:,}"
         )
     if a.startswith("depth"):
         try:
@@ -340,10 +442,26 @@ def _cmd_meboya(args: str, **_: Any) -> str:
         return "Usage: /meboya depth 1|2|3"
     if a == "critical on":
         _state.critical_mode = True
-        return "🔍 Critical analysis mode ON (adversarial pushback enabled)"
+        return "🔍 Critical analysis mode ON"
     if a == "critical off":
         _state.critical_mode = False
         return "🔍 Critical analysis mode OFF"
+    if a.startswith("mc"):
+        parts = a.split()
+        if len(parts) == 2:
+            try:
+                iters = int(parts[1])
+                if 1000 <= iters <= 50000:
+                    _state.monte_carlo_default_iters = iters
+                    return f"🔄 Monte Carlo default iterations set to {iters:,}"
+            except ValueError:
+                pass
+        return "Usage: /meboya mc <iterations> (1000-50000)"
+    if a == "reset":
+        _state.reason_deeper_calls = 0
+        _state.reason_deeper_ignored = 0
+        _state.hard_break_triggered = False
+        return "🔄 reason_deeper counters reset"
     if a == "recall":
         if not MNEMOSYNE_AVAILABLE:
             return "❌ Mnemosyne not available"
@@ -358,12 +476,14 @@ def _cmd_meboya(args: str, **_: Any) -> str:
         return "\n".join(lines)
 
     return (
-        "Usage: /meboya [on|off|status|depth 1-3|critical on|off|recall]\n"
-        "  depth 1 = goal only\n"
-        "  depth 2 = goal + hats (default)\n"
-        "  depth 3 = goal + hats + critical pushback\n"
-        "  critical on|off = toggle adversarial pushback reasoning\n"
-        "  recall = show past goal patterns from Mnemosyne"
+        "Usage: /meboya [on|off|status|depth 1-3|critical on|off|mc <iters>|reset|recall]\n"
+        "  depth 1 = goal + scenarios\n"
+        "  depth 2 = + hats + decision\n"
+        "  depth 3 = + reason_deeper self-critique\n"
+        "  critical on|off = toggle adversarial pushback\n"
+        "  mc <iters> = set Monte Carlo default iterations\n"
+        "  reset = reset reason_deeper counters\n"
+        "  recall = show past patterns from Mnemosyne"
     )
 
 
@@ -374,13 +494,55 @@ def _cmd_meboya(args: str, **_: Any) -> str:
 def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_llm_call", _on_post_llm_call)
+    ctx.register_tool(
+        name="reason_deeper",
+        toolset="meboya",
+        schema={
+            "type": "function",
+            "function": {
+                "name": "reason_deeper",
+                "description": "Recursive self-critique. Deepens analysis on a specific hat lens. "
+                               "Use when analysis feels incomplete or confidence is low. "
+                               "HARD-BREAK: after 3 ignored calls, tool auto-blocks.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "level": {
+                            "type": "integer",
+                            "description": "Critique depth: 2=medium, 3=deep",
+                            "default": 2,
+                        },
+                        "focus": {
+                            "type": "string",
+                            "enum": ["black hat", "green hat", "red hat", "blue hat",
+                                     "white hat", "yellow hat"],
+                            "description": "Which hat lens to critique",
+                            "default": "black hat",
+                        },
+                        "scenarios": {
+                            "type": "string",
+                            "description": "Optional JSON: [[label, prob], ...] for Monte Carlo",
+                            "default": "",
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        handler=lambda args, **kw: reason_deeper(
+            level=args.get("level", 2),
+            focus=args.get("focus", "black hat"),
+            scenarios=args.get("scenarios", None),
+        ),
+        requires_env=[],
+    )
     ctx.register_command(
         name="meboya",
         handler=_cmd_meboya,
-        description="Configure Meboya (on/off/status/depth/critical/recall)",
-        args_hint="[on|off|status|depth 1-3|critical on|off|recall]",
+        description="Configure Meboya (on/off/status/depth/critical/mc/reset/recall)",
+        args_hint="[on|off|status|depth 1-3|critical on|off|mc <iters>|reset|recall]",
     )
     logger.info(
-        "meboya plugin registered (depth=%d, critical=%s, mnemosyne=%s)",
+        "meboya plugin registered (depth=%d, critical=%s, mnemosyne=%s, reason_deeper+mc=loaded)",
         _state.depth, _state.critical_mode, MNEMOSYNE_AVAILABLE,
     )
