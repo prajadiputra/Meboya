@@ -50,13 +50,16 @@ def monte_carlo_simulate(scenarios, iterations=10000, seed=None):
             "iterations":iters}
 
 # ── INSTRUCTION (DOGA-style: 1 line, model will NOT echo) ──
-INSTRUCTION = ("Use <world_model> for internal reasoning, then answer with format: "
-               "[WHITE] facts [BLACK] risks [YELLOW] benefits [GREEN] alternatives [BLUE] synthesis, "
-               "then [DECISION] with Decision/Key Reason/Risk Accepted/Action.")
+INSTRUCTION = ("Use <world_model> for internal reasoning, then answer with format:\n"
+               "[WHITE] facts\n[BLACK] risks\n[YELLOW] benefits\n[GREEN] alternatives\n[BLUE] synthesis\n"
+               "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:")
 
 CRITICAL_INSTRUCTION = ("Use <world_model> for internal reasoning with critical pushback, "
-                        "then [WHITE] [BLACK]├CRITICAL [RED] [YELLOW] [GREEN]├CRITICAL [BLUE]├CRITICAL, "
-                        "then [DECISION] with Decision/Key Reason/Risk Accepted/Action.")
+                        "then answer with format:\n"
+                        "[WHITE] facts\n[BLACK] risks\n  ├ CRITICAL: ...\n[RED] gut reaction\n"
+                        "[YELLOW] benefits\n[GREEN] alternatives\n  ├ CRITICAL: ...\n"
+                        "[BLUE] synthesis\n  ├ CRITICAL: ...\n"
+                        "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:")
 
 # ── STATE ──
 class _State:
@@ -111,9 +114,14 @@ def _cmd(a="", **_):
     if a=="on": _state.enabled=True; return "ON"
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
-        return (f"Meboya: enabled={_state.enabled} depth={_state.depth} critical={'ON' if _state.critical else 'OFF'} "
-                f"mne={'Y' if MNEMOSYNE_AVAILABLE else 'N'} rd={_state.rd_calls} ig={_state.rd_ignored} "
-                f"hb={'Y' if _state.hard_break else 'N'} mc={_state.mc_iters}")
+        return (f"Meboya v2.5.0\n"
+                f"  Enabled: {_state.enabled}\n"
+                f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
+                f"  Critical: {'ON' if _state.critical else 'OFF'}\n"
+                f"  Mnemosyne: {'Y' if MNEMOSYNE_AVAILABLE else 'N'}\n"
+                f"  reason_deeper: {_state.rd_calls} calls, {_state.rd_ignored} ignored\n"
+                f"  Hard-break: {'ON' if _state.hard_break else 'OFF'}\n"
+                f"  MC iters: {_state.mc_iters:,}")
     if a.startswith("depth"):
         try: d=int(a.split()[1]); assert 1<=d<=3; _state.depth=d; return f"depth {d}"
         except: return "depth 1|2|3"
