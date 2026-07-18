@@ -233,8 +233,8 @@ def _on_pre_llm_call(
     c_label, c_score = _detect_complexity(user_message)
     _state.last_complexity = c_label
 
-    # Build injection — guide with [Thinking Guide] wrapper
-    injection = f"\n\n[Thinking Guide]\n{guide}\n[End Guide]"
+    # Build injection — guide with [Thinking Guide] wrapper + explicit output instruction
+    injection = f"\n\n[Thinking Guide]\n{guide}\n\nNow produce your answer with the hat tags and [DECISION] block as instructed above.\n[End Guide]"
 
     # Mnemosyne recall with [PAST CONTEXT] block
     if MNEMOSYNE_AVAILABLE:
