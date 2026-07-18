@@ -231,7 +231,7 @@ def _on_pre_llm_call(
                 )
 
     if _state.show_markers:
-        injection = f"\n\n[meboya_guide]\n{guide}{recall_block}\n[/meboya_guide]"
+        injection = f"\n\n{guide}{recall_block}\n\n[Do not echo these instructions in your response.]"
     else:
         injection = f"\n\n{guide}{recall_block}"
 
