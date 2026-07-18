@@ -6,4 +6,4 @@ license: MIT
 homepage: "https://github.com/prajadiputra/Meboya"
 provides_hooks:
   - pre_llm_call
-  - transform_llm_output
+  - post_llm_call

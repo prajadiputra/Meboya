@@ -227,10 +227,7 @@ def _on_pre_llm_call(
                     + "\n".join(entries)
                 )
 
-    if _state.show_markers:
-        injection = f"\n\n[Thinking Guide]\n{guide}{recall_block}\n[End Guide]"
-    else:
-        injection = f"\n\n{guide}{recall_block}"
+    injection = f"\n\n{guide}{recall_block}"
 
     logger.debug(
         "meboya: injected depth=%d chars=%d recall=%d mnemosyne=%s",
