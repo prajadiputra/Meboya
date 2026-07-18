@@ -131,24 +131,35 @@ Use `<world_model>` for internal reasoning, then output your answer with:
 [GREEN] Alternative: keep Redis for caching + SQL for events with Debezium CDC as stepping stone before full EDA.
 [BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang."""
 
-# Critical mode — optional analytical enrichment
-CRITICAL_HATS_PROMPT = """Evaluate the situation through these parallel lenses:
-  [WHITE] What are the objective facts, data, and constraints?
-  [BLACK] What could go wrong? Risks, edge cases, pitfalls.
+# Critical mode — optional analytical enrichment (NOT a personality injection)
+CRITICAL_HATS_PROMPT = """Structure your answer with mandatory hat tags for each section.
+
+Use `<world_model>` for internal reasoning, then output your answer with:
+
+[WHITE] Facts, data, constraints
+[BLACK] Risks, edge cases, pitfalls
    ├ CRITICAL: Is the premise itself valid? What assumptions may be wrong?
    ├ CRITICAL: What is the user NOT saying? Hidden requirements, unspoken constraints?
    └ CRITICAL: If this approach fails, what is the worst-case path?
-  [RED] What is the gut reaction? What feels off? Trust the intuition signal.
-  [YELLOW] What are the upsides, opportunities, or value?
-  [GREEN] What alternative approaches exist? Creative options.
+[RED] Gut reaction, intuition
+[YELLOW] Benefits, opportunities, value
+[GREEN] Alternatives, creative options
    ├ CRITICAL: What is the OPPOSITE approach? Argue against the default.
    └ CRITICAL: What would a domain expert do differently?
-  [BLUE] Synthesize the above — produce a clear conclusion.
+[BLUE] Synthesis, decision, next steps
    ├ CRITICAL: Is this the BEST answer, or just the easiest acceptable one?
    ├ CRITICAL: Are second-order effects accounted for?
    └ CRITICAL: If challenged on this conclusion, can it be defended?
 
-Apply each lens in order. Never mix lenses in one section.
+**Example output format:**
+[WHITE] The request involves migrating from shared state Redis/SQL to EDA in EKS. Key factors: high-concurrency environment, existing Redis/SQL bottleneck.
+[BLACK] Eventual consistency introduces complexity. Rollback strategy must be redesigned. Consumer lag in high-concurrency can cause data staleness.
+  ├ CRITICAL: Is the "high concurrency" requirement quantified? What QPS are we talking about?
+[YELLOW] Decoupling enables independent scaling per service. NATS/Kafka throughput exceeds shared DB by 10-100x.
+[GREEN] Alternative: keep Redis for caching + SQL for events with Debezium CDC as stepping stone before full EDA.
+  ├ CRITICAL: What would a SRE with 10 years EKS experience do? Keep Redis as hot cache + async event fan-out.
+[BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang.
+  ├ CRITICAL: Is this the BEST answer? NATS is simpler than Kafka for 10k msg/s, but if traffic spikes to 100k+ Kafka is future-proof.
 Push back on the premise when warranted. Surface the dissenter view."""
 
 LIGHT_PROMPT = GOAL_DETECTION
