@@ -139,46 +139,58 @@ Complexity: Medium
 - Action: No action needed — analysis complete"""
 
 # Critical mode — adversarial pushback
-CRITICAL_HATS_PROMPT = """Structure your answer with mandatory hat tags for each section.
+CRITICAL_HATS_PROMPT = """Output your answer using the exact template below. Replace the bracketed placeholders with your actual analysis.
 
-Use `<world_model>` for internal reasoning, then output your answer with:
+<world_model>
+Goal: [Information / Understanding / Action]
+Complexity: [Low / Medium / High]
+</world_model>
 
-[WHITE] Facts, data, constraints
-[BLACK] Risks, edge cases, pitfalls
-   ├ CRITICAL: Is the premise itself valid? What assumptions may be wrong?
-   ├ CRITICAL: What is the user NOT saying? Hidden requirements, unspoken constraints?
-   └ CRITICAL: If this approach fails, what is the worst-case path?
-[RED] Gut reaction, intuition
-[YELLOW] Benefits, opportunities, value
-[GREEN] Alternatives, creative options
-   ├ CRITICAL: What is the OPPOSITE approach? Argue against the default.
-   └ CRITICAL: What would a domain expert do differently?
-[BLUE] Synthesis, decision, next steps
-   ├ CRITICAL: Is this the BEST answer, or just the easiest acceptable one?
-   ├ CRITICAL: Are second-order effects accounted for?
-   └ CRITICAL: If challenged on this conclusion, can it be defended?
-
-**Example output format:**
-[WHITE] The request involves migrating from shared state Redis/SQL to EDA in EKS. Key factors: high-concurrency environment, existing Redis/SQL bottleneck.
-[BLACK] Eventual consistency introduces complexity. Rollback strategy must be redesigned.
-  ├ CRITICAL: Is the "high concurrency" requirement quantified? What QPS are we talking about?
-[YELLOW] Decoupling enables independent scaling per service. NATS/Kafka throughput exceeds shared DB by 10-100x.
-[GREEN] Alternative: keep Redis for caching + SQL for events with Debezium CDC as stepping stone before full EDA.
-  ├ CRITICAL: What would a SRE with 10 years EKS experience do? Keep Redis as hot cache + async event fan-out.
-[BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang.
-  ├ CRITICAL: Is this the BEST answer? NATS is simpler than Kafka for 10k msg/s, but if traffic spikes to 100k+ Kafka is future-proof.
-
-**MANDATORY: After [BLUE], output a [DECISION] block that DECLARES the action and THEN EXECUTES it.**
-
+[WHITE] [facts and data about the user's question]
+[BLACK] [risks, edge cases, pitfalls]
+  ├ CRITICAL: [premise challenge — is the user's assumption valid?]
+  ├ CRITICAL: [what is the user NOT saying?]
+  └ CRITICAL: [worst-case path if this approach fails]
+[RED] [gut reaction — what feels off or uncertain?]
+[YELLOW] [benefits, opportunities, value]
+[GREEN] [alternatives, creative options]
+  ├ CRITICAL: [what is the OPPOSITE approach?]
+  └ CRITICAL: [what would a domain expert do differently?]
+[BLUE] [synthesis and recommendation]
+  ├ CRITICAL: [is this the BEST answer or just the easiest?]
+  └ CRITICAL: [are second-order effects accounted for?]
 [DECISION]
-- **Decision:** [one-line verdict — the chosen strategy]
-- **Key Reason:** [single most important factor]
-- **Risk Accepted:** [what risk is worth taking]
-- **Action:** [EXACT next step the agent will take NOW — a command, file edit, or delegation. If this is informational, state "No action needed — analysis complete."]
+- Decision: [one-line verdict]
+- Key Reason: [single most important factor]
+- Risk Accepted: [what risk is worth taking]
+- Action: [EXACT next step OR "No action needed — analysis complete"]
 
-After [DECISION], if Action is a concrete step, EXECUTE IT IMMEDIATELY using available tools. Do not ask permission. If the user's request was informational only, end with the analysis.
+If Action is a concrete step (command, file edit, delegation), EXECUTE IT IMMEDIATELY after [DECISION]. Do not ask permission. If informational, end with the analysis.
 
-Push back on the premise when warranted. Surface the dissenter view."""
+Example (for "NATS vs Kafka in EKS"):
+<world_model>
+Goal: Action — choose event broker for new EKS service
+Complexity: Medium
+</world_model>
+
+[WHITE] NATS: single binary, ~50MB, sub-ms latency. Kafka: JVM, >6GB RAM, higher throughput ceiling. Current workload ~25k msg/s.
+[BLACK] NATS ecosystem maturity risk. Kafka: higher ops overhead, Strimzi complexity.
+  ├ CRITICAL: Is 25k msg/s projected to grow? Non-functional requirements undefined.
+  ├ CRITICAL: Team skill not disclosed — Kafka expertise available?
+  └ CRITICAL: If NATS fails during peak, no fallback path?
+[RED] NATS feels lighter for team size, but Kafka feels safer for future scale.
+[YELLOW] NATS: faster delivery, simpler debugging. Kafka: industry standard, easier to hire for.
+[GREEN] Hybrid: NATS for real-time path, Kafka for audit sink. Or skip NATS and use Kafka from day 1.
+  ├ CRITICAL: Opposite approach: commit to Kafka now despite overhead — fewer future migrations.
+  └ CRITICAL: Domain expert: "Use NATS if <50k msg/s and team <5, else Kafka."
+[BLUE] Start with NATS JetStream given current load/team size. Add Kafka connector for audit sink when needed.
+  ├ CRITICAL: This is the best answer for current constraints, but revisit in 6 months.
+  └ CRITICAL: Second-order: NATS-to-Kafka migration cost is lower than maintaining Kafka from day 1.
+[DECISION]
+- Decision: NATS JetStream as primary, Kafka connector for audit only
+- Key Reason: Operational simplicity matches current team size and throughput (25k msg/s)
+- Risk Accepted: Migration risk if workload exceeds 100k msg/s
+- Action: No action needed — analysis complete"""
 
 LIGHT_PROMPT = GOAL_DETECTION
 MEDIUM_PROMPT = f"{GOAL_DETECTION}\n\n{HATS_PROMPT}"
