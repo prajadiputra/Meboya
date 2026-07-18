@@ -101,32 +101,42 @@ GOAL_DETECTION = """Before answering, briefly identify what the user's primary n
 Choose the dominant goal and let it shape your response."""
 
 # ONE-SHOT: model compliance naik drastis dengan contoh eksplisit
-HATS_PROMPT = """Structure your answer with mandatory hat tags for each section.
+HATS_PROMPT = """Output your answer using the exact template below. Replace the bracketed placeholders with your actual analysis.
 
-Use `<world_model>` for internal reasoning, then output your answer with:
+<world_model>
+Goal: [Information / Understanding / Action]
+Complexity: [Low / Medium / High]
+</world_model>
 
-[WHITE] Facts, data, constraints
-[BLACK] Risks, edge cases, pitfalls
-[YELLOW] Benefits, opportunities, value
-[GREEN] Alternatives, creative options
-[BLUE] Synthesis, decision, next steps
-
-**Example output format:**
-[WHITE] The request involves migrating from shared state Redis/SQL to EDA in EKS. Key factors: high-concurrency environment, existing Redis/SQL bottleneck.
-[BLACK] Eventual consistency introduces complexity. Rollback strategy must be redesigned. Consumer lag in high-concurrency can cause data staleness.
-[YELLOW] Decoupling enables independent scaling per service. NATS/Kafka throughput exceeds shared DB by 10-100x.
-[GREEN] Alternative: keep Redis for caching + SQL for events with Debezium CDC as stepping stone before full EDA.
-[BLUE] Recommended: start with NATS JetStream via Helm + outbox pattern. Roll out per-service, not big-bang.
-
-**MANDATORY: After [BLUE], output a [DECISION] block that DECLARES the action and THEN EXECUTES it.**
-
+[WHITE] [facts and data about the user's question]
+[BLACK] [risks, edge cases, pitfalls]
+[YELLOW] [benefits, opportunities, value]
+[GREEN] [alternatives, creative options]
+[BLUE] [synthesis and recommendation]
 [DECISION]
-- **Decision:** [one-line verdict — the chosen strategy]
-- **Key Reason:** [single most important factor]
-- **Risk Accepted:** [what risk is worth taking]
-- **Action:** [EXACT next step the agent will take NOW — a command, file edit, or delegation. If this is informational, state "No action needed — analysis complete."]
+- Decision: [one-line verdict]
+- Key Reason: [single most important factor]
+- Risk Accepted: [what risk is worth taking]
+- Action: [EXACT next step OR "No action needed — analysis complete"]
 
-After [DECISION], if Action is a concrete step, EXECUTE IT IMMEDIATELY using available tools. Do not ask permission. If the user's request was informational only, end with the analysis."""
+If Action is a concrete step (command, file edit, delegation), EXECUTE IT IMMEDIATELY after [DECISION]. Do not ask permission. If informational, end with the analysis.
+
+Example (for "NATS vs Kafka in EKS"):
+<world_model>
+Goal: Information — comparison of two event broker options in Kubernetes
+Complexity: Medium
+</world_model>
+
+[WHITE] NATS JetStream: single binary Go, ~50MB RAM, sub-ms latency, subject-based addressing. Kafka: JVM, GBs of RAM, partition/offset model, higher throughput ceiling.
+[BLACK] NATS: smaller ecosystem, less tooling maturity. Kafka: JVM ops burden, more complex to deploy via Strimzi.
+[YELLOW] NATS: simpler ops, lower resource cost, faster startup. Kafka: proven at massive scale, rich ecosystem (Connect, Streams, ksqlDB).
+[GREEN] Hybrid: NATS for hot path, Kafka for audit log. Or Redis Streams as stepping stone before either.
+[BLUE] Default to NATS JetStream unless throughput exceeds 100k msg/s or Kafka ecosystem tooling is required.
+[DECISION]
+- Decision: NATS JetStream as default event broker in EKS
+- Key Reason: Operational simplicity + resource efficiency for typical workloads
+- Risk Accepted: May need to migrate to Kafka if scale exceeds NATS ceiling
+- Action: No action needed — analysis complete"""
 
 # Critical mode — adversarial pushback
 CRITICAL_HATS_PROMPT = """Structure your answer with mandatory hat tags for each section.
