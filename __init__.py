@@ -233,10 +233,10 @@ def _on_pre_llm_call(
     c_label, c_score = _detect_complexity(user_message)
     _state.last_complexity = c_label
 
-    # Build injection — guide only, no wrappers
-    injection = f"\n\n{guide}"
+    # Build injection — guide with [Thinking Guide] wrapper
+    injection = f"\n\n[Thinking Guide]\n{guide}\n[End Guide]"
 
-    # Silent Mnemosyne recall (no visible block)
+    # Mnemosyne recall with [PAST CONTEXT] block
     if MNEMOSYNE_AVAILABLE:
         recalled = _recall(user_message, top_k=2)
         if recalled:
@@ -247,7 +247,8 @@ def _on_pre_llm_call(
                 entries.append(f"  - Past similar query (goal={goal}): {content[:120]}")
             if entries:
                 injection += (
-                    "\n\nYou have seen similar queries before:\n"
+                    "\n\n[PAST CONTEXT — these were user goals for similar past queries. "
+                    "Use this to calibrate your response approach.]\n"
                     + "\n".join(entries)
                 )
 
