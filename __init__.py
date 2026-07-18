@@ -121,7 +121,15 @@ HATS_PROMPT = """Evaluate the situation through these parallel lenses:
   [GREEN] What alternative approaches exist? Creative options.
   [BLUE] Synthesize the above — produce a clear conclusion.
 
-Apply each lens in order. Never mix lenses in one section."""
+Apply each lens in order. Never mix lenses in one section.
+
+**MANDATORY: Prefix each section of your response with the corresponding hat tag.**
+Format each paragraph as:
+[WHITE] Your facts and data here...
+[BLACK] Your risks and concerns here...
+[YELLOW] Your benefits and value here...
+[GREEN] Your alternatives and creative options here...
+[BLUE] Your synthesis and conclusion here..."""
 
 # Critical mode — optional analytical enrichment
 CRITICAL_HATS_PROMPT = """Evaluate the situation through these parallel lenses:
