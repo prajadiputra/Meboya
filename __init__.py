@@ -49,17 +49,18 @@ def monte_carlo_simulate(scenarios, iterations=10000, seed=None):
             "winner":lbs[idx[0][0]],"confidence":round(idx[0][1]-(idx[1][1] if len(idx)>1 else 0),4),
             "iterations":iters}
 
-# ── INSTRUCTION (DOGA-style: 1 line, model will NOT echo) ──
-INSTRUCTION = ("Use <world_model> for internal reasoning, then answer with format:\n"
+# ── INSTRUCTION (DOGA-style) ──
+INSTRUCTION = ("Begin your response with <world_model>Reasoning:</world_model> (1-2 sentences), then:\n"
                "[WHITE] facts\n[BLACK] risks\n[YELLOW] benefits\n[GREEN] alternatives\n[BLUE] synthesis\n"
-               "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:")
+               "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
+               "After [DECISION], ask one natural follow-up question to continue the conversation.")
 
-CRITICAL_INSTRUCTION = ("Use <world_model> for internal reasoning with critical pushback, "
-                        "then answer with format:\n"
+CRITICAL_INSTRUCTION = ("Begin your response with <world_model>Reasoning:</world_model> (1-2 sentences), then:\n"
                         "[WHITE] facts\n[BLACK] risks\n  ├ CRITICAL: ...\n[RED] gut reaction\n"
                         "[YELLOW] benefits\n[GREEN] alternatives\n  ├ CRITICAL: ...\n"
                         "[BLUE] synthesis\n  ├ CRITICAL: ...\n"
-                        "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:")
+                        "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
+                        "After [DECISION], ask one natural follow-up question to continue the conversation.")
 
 # ── STATE ──
 class _State:
