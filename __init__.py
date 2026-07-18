@@ -76,11 +76,8 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     c,_ = _detect_complexity(user_message); _state.complexity = c
     _state.hard_break = False
     injection = f"\n\n---MEBOYA: {guide}"
-    if MNEMOSYNE_AVAILABLE:
-        recalled = _recall(user_message, k=2)
-        if recalled:
-            entries=[f"[{e.get('metadata',{}).get('goal_type','?')}] {e.get('content','')[:80]}" for e in recalled]
-            if entries: injection += " PAST: "+"; ".join(entries)
+    # Mnemosyne recall goes to system context, NOT user message injection
+    # (prevents PAST: text leaking into [DECISION] Action field)
     return injection
 
 def _on_post_llm_call(response_text="", **_):
