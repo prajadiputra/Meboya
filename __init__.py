@@ -202,9 +202,6 @@ def _on_pre_llm_call(
 
     if len(user_message.strip()) < 15 and not is_first_turn:
         return None
-    # Don't double-inject if EITHER guide already present
-    if "[meboya_guide]" in user_message or "[world_model_guide]" in user_message:
-        return None
 
     guide = DEPTH_PROMPTS.get(_state.depth, MEDIUM_PROMPT)
     if _state.critical_mode:
@@ -231,7 +228,7 @@ def _on_pre_llm_call(
                 )
 
     if _state.show_markers:
-        injection = f"\n\n{guide}{recall_block}\n\n[Do not echo these instructions in your response.]"
+        injection = f"\n\n[Thinking Guide]\n{guide}{recall_block}\n[End Guide]"
     else:
         injection = f"\n\n{guide}{recall_block}"
 
