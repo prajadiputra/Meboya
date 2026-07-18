@@ -398,7 +398,6 @@ def _cmd_meboya(args: str, **_: Any) -> str:
             f"  Markers: {_state.show_markers}\n"
             f"  Trace display: {'ON' if _state.show_trace else 'OFF'}\n"
             f"  Mnemosyne: {'✅ connected' if MNEMOSYNE_AVAILABLE else '❌ unavailable'}\n"
-            f"  Last goal: {_state.last_goal_type}\n"
             f"  Last complexity: {_state.last_complexity}"
         )
     if a.startswith("depth"):

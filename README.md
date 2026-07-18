@@ -146,6 +146,63 @@ Response delivered to user (with 💡 trace prefix)
 
 ---
 
+## Mnemosyne Integration (Optional Memory Layer)
+
+Meboya can optionally connect to [Mnemosyne](https://github.com/mnemosyne-oss/mnemosyne) — a universal memory layer for Hermes Agent. This integration is **fully optional**: Meboya works perfectly without it, but with Mnemosyne it gains persistent memory across sessions.
+
+### Install Mnemosyne
+
+```bash
+pip install mnemosyne-memory
+```
+
+Or via Hermes plugin system:
+
+```bash
+hermes plugins install mnemosyne-oss/mnemosyne
+```
+
+Repo: [github.com/mnemosyne-oss/mnemosyne](https://github.com/mnemosyne-oss/mnemosyne)
+
+### How Meboya Uses Mnemosyne
+
+Meboya integrates with Mnemosyne through two hooks:
+
+| Hook | What Meboya does with Mnemosyne |
+|------|--------------------------------|
+| `pre_llm_call` | **Recall** — queries Mnemosyne for past queries with similar intent, injects them as `[PAST CONTEXT]` into the thinking guide so the model can calibrate its response approach |
+| `transform_llm_output` | **Write** — after the model responds, Meboya saves the user's query + detected goal type + complexity score to Mnemosyne for future recall |
+
+### What Gets Stored
+
+Each turn, Meboya writes a memory entry with:
+
+- **content**: the user's original message
+- **goal_type**: `information` / `understanding` / `action` / `unknown`
+- **complexity**: `low` / `medium` / `high` (heuristic score)
+- **depth**: current thinking depth (1-3)
+
+### Benefits
+
+| Without Mnemosyne | With Mnemosyne |
+|-------------------|----------------|
+| Meboya works in isolation, no memory | Meboya remembers past query patterns |
+| Each session starts fresh | Similar queries get context-aware calibration |
+| `/meboya recall` returns empty | `/meboya recall` shows past goal patterns |
+| Status shows `❌ unavailable` | Status shows `✅ connected` |
+
+### Verify Connection
+
+After installing Mnemosyne, restart Hermes and check:
+
+```
+/meboya status
+```
+
+If `Mnemosyne: ✅ connected` appears, the integration is active. If `❌ unavailable`, Meboya will continue working in standalone mode (no crash, no error — just no memory features).
+
+---
+
 ## Origin
 
 Meboya is inspired by **DOGA** — the original probabilistic thinking layer plugin by [0z1-ghb](https://github.com/0z1-ghb/doga-hermes). It was rewritten from scratch with different design priorities:
