@@ -1,12 +1,12 @@
 """Meboya — Balinese for "questioning everything".
 
 An auto-thinking plugin for Hermes Agent that injects structured prompts
-(Goal Detection + Six Thinking Hats) before each LLM call, with optional
-Mnemosyne memory recall and write. Zero hard dependencies.
+(Goal Detection + Six Thinking Hats + Critical Mode) before each LLM call,
+with optional Mnemosyne memory recall and write. Zero hard dependencies.
 
 Hooks:
-  pre_llm_call            → recall past goal patterns + inject guide
-  transform_llm_output    → strip markers + write goal to memory
+  pre_llm_call            → inject thinking guide + trace context
+  post_llm_call           → save goal pattern to Mnemosyne
 
 Compatible with Hermes Agent. Falls back gracefully if Mnemosyne is missing.
 """
@@ -38,6 +38,7 @@ except ImportError:
 if not MNEMOSYNE_AVAILABLE:
     try:
         from mnemosyne import Mnemosyne
+
         _mnemosyne = Mnemosyne()
         MNEMOSYNE_AVAILABLE = True
         logger.info("meboya: Mnemosyne connected")
@@ -122,18 +123,7 @@ HATS_PROMPT = """Evaluate the situation through these parallel lenses:
 
 Apply each lens in order. Never mix lenses in one section."""
 
-LIGHT_PROMPT = GOAL_DETECTION
-MEDIUM_PROMPT = f"{GOAL_DETECTION}\n\n{HATS_PROMPT}"
-DEEP_PROMPT = f"""{GOAL_DETECTION}
-
-{HATS_PROMPT}
-
-After synthesis, call `reason_deeper` tool if analysis feels incomplete
-(focus: "black hat cascade", "yellow hat assumptions", "green hat gaps")."""
-
-# Critical mode — optional analytical enrichment inspired by adversarial
-# reasoning. NOT a personality injection — extends the BLACK/RED/BLUE hats
-# with structured pushback. Toggle via /meboya critical on|off.
+# Critical mode — optional analytical enrichment
 CRITICAL_HATS_PROMPT = """Evaluate the situation through these parallel lenses:
   [WHITE] What are the objective facts, data, and constraints?
   [BLACK] What could go wrong? Risks, edge cases, pitfalls.
@@ -153,10 +143,24 @@ CRITICAL_HATS_PROMPT = """Evaluate the situation through these parallel lenses:
 Apply each lens in order. Never mix lenses in one section.
 Push back on the premise when warranted. Surface the dissenter view."""
 
+LIGHT_PROMPT = GOAL_DETECTION
+MEDIUM_PROMPT = f"{GOAL_DETECTION}\n\n{HATS_PROMPT}"
+DEEP_PROMPT = f"""{GOAL_DETECTION}
+
+{HATS_PROMPT}
+
+After synthesis, call `reason_deeper` tool if analysis feels incomplete
+(focus: "black hat cascade", "yellow hat assumptions", "green hat gaps")."""
+
 CRITICAL_DEPTH_PROMPTS = {
     1: GOAL_DETECTION,
     2: f"{GOAL_DETECTION}\n\n{CRITICAL_HATS_PROMPT}",
-    3: f"{GOAL_DETECTION}\n\n{CRITICAL_HATS_PROMPT}\n\nAfter synthesis, call `reason_deeper` tool if analysis feels incomplete\n(focus: 'second-order effects', 'opposing viewpoint', 'premise validity').",
+    3: f"""{GOAL_DETECTION}
+
+{CRITICAL_HATS_PROMPT}
+
+After synthesis, call `reason_deeper` tool if analysis feels incomplete
+(focus: 'second-order effects', 'opposing viewpoint', 'premise validity').""",
 }
 
 DEPTH_PROMPTS = {1: LIGHT_PROMPT, 2: MEDIUM_PROMPT, 3: DEEP_PROMPT}
@@ -173,8 +177,8 @@ class _State:
     last_user_message: str = ""
     last_goal_type: str = "unknown"
     last_complexity: str = "medium"
-    show_trace: bool = True  # NEW: always show trace, independent of markers
-    critical_mode: bool = False  # NEW: critical analytical pushback
+    show_trace: bool = True
+    critical_mode: bool = False
 
 
 _state = _State()
@@ -204,7 +208,7 @@ def _on_pre_llm_call(
 
     guide = DEPTH_PROMPTS.get(_state.depth, MEDIUM_PROMPT)
     if _state.critical_mode:
-        critical_level = _state.depth  # Depth tetap menentukan kompleksitas prompt
+        critical_level = _state.depth
         guide = CRITICAL_DEPTH_PROMPTS.get(critical_level, CRITICAL_DEPTH_PROMPTS[2])
     c_label, c_score = _detect_complexity(user_message)
     _state.last_complexity = c_label
@@ -237,6 +241,10 @@ def _on_pre_llm_call(
     )
     return injection
 
+
+# ──────────────────────────────────────────────────────────────────────
+# post_llm_call hook — save goal pattern to Mnemosyne
+# ──────────────────────────────────────────────────────────────────────
 
 _WORLD_MODEL_RE = re.compile(
     r"<world_model>\s*(.*?)\s*</world_model>",
@@ -286,18 +294,19 @@ def _detect_active_hats(text: str) -> List[str]:
     ))
 
 
-def _on_transform_llm_output(response_text: str = "", **_: Any) -> Optional[str]:
-    """Strip guide markers, format world_model blocks, always prepend trace.
-
-    Trace visible to user regardless of world_model presence.
-    """
+def _on_post_llm_call(
+    response_text: str = "",
+    user_message: str = "",
+    **_: Any,
+) -> None:
+    """Save goal pattern to Mnemosyne after LLM response."""
     if not _state.enabled or not response_text:
-        return None
+        return
 
-    # Detect goal
+    # Detect goal from response (works if model outputs <world_model> tags)
     if _state.last_user_message:
         goal_type = _detect_goal_type(response_text)
-        c_label, _ = _detect_complexity(_state.last_user_message)
+        c_label, c_score = _detect_complexity(_state.last_user_message)
         _remember(
             content=_state.last_user_message,
             importance=0.7,
@@ -305,75 +314,11 @@ def _on_transform_llm_output(response_text: str = "", **_: Any) -> Optional[str]
             metadata={
                 "goal_type": goal_type,
                 "complexity": c_label,
+                "complexity_score": c_score,
                 "depth": _state.depth,
             },
         )
         _state.last_goal_type = goal_type
-
-    if not _state.show_markers:
-        # Still add trace even if markers off — trace != injection markers
-        pass  # proceed with formatting
-
-    # Strip guide markers
-    cleaned = re.sub(
-        r"\[meboya_guide\].*?\[/meboya_guide\]",
-        "",
-        response_text,
-        flags=re.DOTALL,
-    )
-    cleaned = re.sub(
-        r"\[world_model_guide\].*?\[/world_model_guide\]",
-        "",
-        cleaned,
-        flags=re.DOTALL,
-    )
-    # Also strip any stray tags
-    cleaned = re.sub(r"\[/?meboya_guide\]", "", cleaned)
-    cleaned = re.sub(r"\[/?world_model_guide\]", "", cleaned)
-
-    # Extract world_model reasoning blocks
-    blocks, final_answer = _extract_world_model(cleaned)
-
-    # Always prepend trace markers, regardless of blocks/markers/trace flag
-    trace = (
-        "💡 **Meboya: Starting thinking process...**\n\n"
-        f"**Mode:** Goal Detection + Six Thinking Hats\n"
-        f"**Depth:** {_state.depth} | **Complexity:** {_state.last_complexity}\n"
-    )
-
-    if blocks:
-        panel = _format_thinking_panel(blocks)
-        if panel:
-            trace += (
-                "🧠 **Thinking panel detected.** "
-                "Model produced structured analysis.\n\n"
-                f"{panel}\n\n"
-            )
-        else:
-            trace += "🔍 No structured thought blocks extracted.\n\n"
-    else:
-        trace += "⚡ Model responded without explicit `<world_model>` tags.\n\n"
-
-    # Detect which hats the model actually used
-    active_hats = _detect_active_hats(response_text)
-    if active_hats:
-        trace += (
-            f"🎩 **Hats used:** {' → '.join(h.upper() for h in active_hats)}\n"
-        )
-    else:
-        trace += "🎩 **Hats: none detected** (model didn't use hat prefixes)\n"
-
-    trace += (
-        f"✅ **Meboya: Thinking process complete. Summary ready.**\n"
-        f"---\n"
-    )
-
-    result = trace + "\n" + final_answer
-
-    # Strip leaked world_model raw tags
-    result = re.sub(r"</?world_model>\s*", "", result, flags=re.I).strip()
-
-    return result if result != response_text else result
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -456,14 +401,14 @@ def _cmd_meboya(args: str, **_: Any) -> str:
 
 def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
-    ctx.register_hook("transform_llm_output", _on_transform_llm_output)
+    ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_command(
         name="meboya",
         handler=_cmd_meboya,
-        description="Configure Meboya (on/off/status/depth/recall)",
-        args_hint="[on|off|status|depth 1-3|markers on|off|trace on|off|recall]",
+        description="Configure Meboya (on/off/status/depth/recall/critical)",
+        args_hint="[on|off|status|depth 1-3|markers on|off|trace on|off|critical on|off|recall]",
     )
     logger.info(
-        "meboya plugin registered (depth=%d, mnemosyne=%s)",
+        "meboya plugin registered (depth=%d, mnemosyne=%s, transform_hook=removed)",
         _state.depth, MNEMOSYNE_AVAILABLE,
     )
