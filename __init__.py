@@ -77,7 +77,7 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     _state.hard_break = False
     injection = f"\n\n---MEBOYA: {guide}"
     if MNEMOSYNE_AVAILABLE:
-        recalled = _recall(user_message, top_k=2)
+        recalled = _recall(user_message, k=2)
         if recalled:
             entries=[f"[{e.get('metadata',{}).get('goal_type','?')}] {e.get('content','')[:80]}" for e in recalled]
             if entries: injection += " PAST: "+"; ".join(entries)
