@@ -88,7 +88,9 @@ The wrapper uses `k`, the Mnemosyne API uses `top_k`.
 
 ---
 
-## 📋 RELEASE CHECKLIST
+## 📋 RELEASE CHECKLIST — MANDATORY FOR EVERY COMMIT
+
+**This is NOT optional. If you skip this, the release is lost and user will be angry.**
 
 After every commit:
 1. `python3 test_trace_hats.py` → ✅ PASSED
@@ -96,6 +98,23 @@ After every commit:
 3. `git add -A && git commit`
 4. `git push origin main`
 5. Update version string in status/logger
-6. `git tag -a vX.Y.Z`
+6. `git tag -a vX.Y.Z -m "Meboya vX.Y.Z"`
 7. `git push origin vX.Y.Z`
-8. `gh release create vX.Y.Z --title "..." --notes "..."`
+8. `gh release create vX.Y.Z --title "..." --notes "..." --repo prajadiputra/Meboya`
+
+**⚠️ If `gh release create` is blocked by gateway:**
+Create release manually from Mac:
+```bash
+gh release create vX.Y.Z --title "Meboya vX.Y.Z" --notes "## vX.Y.Z
+### Changelog
+- [change 1]
+- [change 2]
+
+### Update
+hermes plugins update meboya
+hermes gateway restart" --repo prajadiputra/Meboya
+```
+
+**If tags exist but no release:** Check `gh release list` after push. If tag exists but no release, create release in NEXT commit cycle.
+
+**NEVER say "release sudah push" without running `gh release create`.**
