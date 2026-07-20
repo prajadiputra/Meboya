@@ -112,7 +112,7 @@ def _cmd(a="", **_):
     if a=="on": _state.enabled=True; return "ON"
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
-        return (f"Meboya v2.5.5\n"
+        return (f"Meboya v2.5.7\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
                 f"  Critical: {'ON' if _state.critical else 'OFF'}\n"
@@ -125,6 +125,8 @@ def _cmd(a="", **_):
         except: return "depth 1|2|3"
     if a=="critical on": _state.critical=True; return "ON"
     if a=="critical off": _state.critical=False; return "OFF"
+    if a=="hard-break on": _state.hard_break=True; return "hard-break ON"
+    if a=="hard-break off": _state.hard_break=False; return "hard-break OFF"
     if a.startswith("mc"):
         try: i=int(a.split()[1]); assert 1000<=i<=50000; _state.mc_iters=i; return f"mc {i}"
         except: return "mc 1000-50000"
@@ -133,7 +135,7 @@ def _cmd(a="", **_):
         if not MNEMOSYNE_AVAILABLE: return "No Mnemosyne"
         e=_recall(_state.last_msg or "recent",3)
         return "Past:\n"+"\n".join(f"[{x.get('metadata',{}).get('goal_type','?')}] {x.get('content','')[:80]}" for x in e) if e else "empty"
-    return "meboya: on|off|status|depth|critical|mc|reset|recall"
+    return "meboya: on|off|status|depth|critical|hard-break|mc|reset|recall"
 
 def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
@@ -151,4 +153,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.5.5 loaded (DOGA-style)")
+    logger.info("meboya v2.5.7 loaded (DOGA-style)")
