@@ -64,7 +64,33 @@ try:
 except Exception as e:
     errors.append(f"CRASH: reason_deeper raised {e}")
 
-# 6. Verify tool schema not double-wrapped
+# 6. Verify hide strips hats even when model ignores <world_model> wrapper
+try:
+    from __init__ import _format_show_hide
+    _state.show_mode = False
+    telegram_like = """[WHITE] facts
+[BLACK] risks
+[RED] gut
+[YELLOW] benefits
+[GREEN] alternatives
+[BLUE] synthesis
+
+[DECISION]
+- Decision: concise
+- Key Reason: test
+- Risk Accepted: none
+- Action: done
+
+Follow-up?"""
+    hidden = _format_show_hide(telegram_like)
+    if any(tag in hidden for tag in ("[WHITE]", "[BLACK]", "[RED]", "[YELLOW]", "[GREEN]", "[BLUE]")):
+        errors.append("FAIL: hide leaked hat blocks outside <world_model>")
+    if "[DECISION]" not in hidden or "Follow-up?" not in hidden:
+        errors.append("FAIL: hide removed decision or follow-up")
+finally:
+    _state.show_mode = True
+
+# 7. Verify tool schema not double-wrapped
 # Bug: Meboya v2.6.0 passed {"type":"function","function":{...}} →
 # Hermes wraps again → tools[N].function.function/type → LimitRouter 400
 try:

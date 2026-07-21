@@ -70,12 +70,21 @@ _state = _State()
 
 # ── HOOKS ──
 def _format_show_hide(response_text=""):
-    """DOGA-style: strip <world_model> when hide; reasoning still happens upstream."""
+    """DOGA-style: strip thinking panel when hide; keep [DECISION] + follow-up.
+
+    Primary path: strip closed <world_model>...</world_model>.
+    Fallback: if model emits [WHITE]...[BLUE] outside tags, keep from [DECISION] onward.
+    """
     if not response_text or _state.show_mode:
         return response_text
     import re
     cleaned = re.sub(r"<world_model>.*?</world_model>", "", response_text, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"</?world_model>\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    hat_tags = ("[WHITE]", "[BLACK]", "[RED]", "[YELLOW]", "[GREEN]", "[BLUE]")
+    if any(t in cleaned for t in hat_tags):
+        m = re.search(r"(?m)^\[DECISION\]", cleaned)
+        if m:
+            cleaned = cleaned[m.start():].strip()
     return cleaned or response_text
 
 
@@ -132,7 +141,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.6.2\n"
+        return (f"Meboya v2.6.3\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
@@ -195,4 +204,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.6.2 loaded (DOGA-style)")
+    logger.info("meboya v2.6.3 loaded (DOGA-style)")
