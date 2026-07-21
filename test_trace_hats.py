@@ -64,6 +64,30 @@ try:
 except Exception as e:
     errors.append(f"CRASH: reason_deeper raised {e}")
 
+# 6. Verify tool schema not double-wrapped
+# Bug: Meboya v2.6.0 passed {"type":"function","function":{...}} →
+# Hermes wraps again → tools[N].function.function/type → LimitRouter 400
+try:
+    class _Ctx:
+        def __init__(self): self.tools={}
+        def register_hook(self,*a,**k): pass
+        def register_command(self,*a,**k): pass
+        def register_tool(self, name, toolset=None, schema=None, handler=None, **k):
+            self.tools[name]=schema
+    from __init__ import register
+    ctx=_Ctx(); register(ctx)
+    for tname, s in ctx.tools.items():
+        if not isinstance(s, dict):
+            errors.append(f"FAIL: tool {tname} schema not dict")
+            continue
+        sks = set(s.keys())
+        if not {'name','description','parameters'} <= sks:
+            errors.append(f"FAIL: tool {tname} missing keys: {sks}")
+        if 'function' in s or 'type' in s:
+            errors.append(f"FAIL: tool {tname} double-wrapped — Has {sorted(s.keys())}")
+except Exception as e:
+    errors.append(f"CRASH: schema double-wrap check raised {e}")
+
 # Report
 if errors:
     for e in errors:
