@@ -50,17 +50,16 @@ def monte_carlo_simulate(scenarios, iterations=10000, seed=None):
             "iterations":iters}
 
 # ── INSTRUCTION (DOGA-style) ──
-INSTRUCTION = ("Begin your response with <world_model>Reasoning:</world_model> (1-2 sentences), then:\n"
-               "[WHITE] facts\n[BLACK] risks\n[YELLOW] benefits\n[GREEN] alternatives\n[BLUE] synthesis\n"
+INSTRUCTION = ("Put [WHITE] facts, [BLACK] risks, [YELLOW] benefits, [GREEN] alternatives, "
+               "and [BLUE] synthesis inside <world_model>...</world_model>, then output:\n"
                "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
-               "After [DECISION], ask one natural follow-up question to continue the conversation.")
+               "After [DECISION], ask one natural follow-up question.")
 
-CRITICAL_INSTRUCTION = ("Begin your response with <world_model>Reasoning:</world_model> (1-2 sentences), then:\n"
-                        "[WHITE] facts\n[BLACK] risks\n  ├ CRITICAL: ...\n[RED] gut reaction\n"
-                        "[YELLOW] benefits\n[GREEN] alternatives\n  ├ CRITICAL: ...\n"
-                        "[BLUE] synthesis\n  ├ CRITICAL: ...\n"
+CRITICAL_INSTRUCTION = ("Put [WHITE] facts, [BLACK] risks with ├ CRITICAL: pushback, [RED] gut reaction, "
+                        "[YELLOW] benefits, [GREEN] alternatives with ├ CRITICAL: pushback, and [BLUE] synthesis "
+                        "with ├ CRITICAL: pushback inside <world_model>...</world_model>, then output:\n"
                         "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
-                        "After [DECISION], ask one natural follow-up question to continue the conversation.")
+                        "After [DECISION], ask one natural follow-up question.")
 
 # ── STATE ──
 class _State:
@@ -70,16 +69,24 @@ class _State:
 _state = _State()
 
 # ── HOOKS ──
+def _format_show_hide(response_text=""):
+    """DOGA-style: strip <world_model> when hide; reasoning still happens upstream."""
+    if not response_text or _state.show_mode:
+        return response_text
+    import re
+    cleaned = re.sub(r"<world_model>.*?</world_model>", "", response_text, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r"</?world_model>\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    return cleaned or response_text
+
+
 def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     if not _state.enabled: return None
     _state.last_msg = user_message
     if len(user_message.strip()) < 5 and not is_first_turn: return None
-    if not _state.show_mode:
-        guide = ("Answer directly with [DECISION] only:\n- Decision:\n- Key Reason:\n"
-                 "- Risk Accepted:\n- Action:\nThen ask one natural follow-up question.")
-    elif not _state.hats_enabled:
-        guide = ("Answer directly with concise analysis, then:\n[DECISION]\n- Decision:\n"
-                 "- Key Reason:\n- Risk Accepted:\n- Action:\nThen ask one natural follow-up question.")
+    if not _state.hats_enabled:
+        guide = ("Put concise analysis inside <world_model>...</world_model>, then output:\n"
+                 "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
+                 "Ask one natural follow-up question after [DECISION].")
     else:
         guide = CRITICAL_INSTRUCTION if _state.critical else INSTRUCTION
     c,_ = _detect_complexity(user_message); _state.complexity = c
@@ -97,6 +104,10 @@ def _on_post_llm_call(response_text="", **_):
     if _state.rd_calls>0 and "reason_deeper" not in response_text:
         _state.rd_ignored+=1
         if _state.rd_ignored>=3: _state.hard_break=True; logger.warning("meboya: HARD BREAK")
+
+def _on_transform_llm_output(response_text="", **_):
+    """DOGA-style: strip <world_model> when hide; reasoning stays intact upstream."""
+    return _format_show_hide(response_text)
 
 # ── reason_deeper ──
 def reason_deeper(level=2, focus="black hat", scenarios=None, **_):
@@ -121,12 +132,12 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.5.9\n"
+        return (f"Meboya v2.6.0\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
                 f"  Hats: {'ON' if _state.hats_enabled else 'OFF'}\n"
-                f"  Show: {'ON' if _state.show_mode else 'OFF (decision only)'}\n"
+                f"  Show: {'ON' if _state.show_mode else 'OFF (panel hidden)'}\n"
                 f"  Critical: {'ON' if _state.critical else 'OFF'}\n"
                 f"  Mnemosyne: {'Y' if MNEMOSYNE_AVAILABLE else 'N'}\n"
                 f"  MC iters: {_state.mc_iters:,}\n"
@@ -146,8 +157,8 @@ def _cmd(a="", **_):
         except: return "depth 1|2|3"
     if a=="hats on": _state.hats_enabled=True; return "hats ON"
     if a=="hats off": _state.hats_enabled=False; return "hats OFF"
-    if a=="show": _state.show_mode=True; return "show (full output)"
-    if a=="hide": _state.show_mode=False; return "hide (decision only)"
+    if a=="show": _state.show_mode=True; return "show (simulation panel ON)"
+    if a=="hide": _state.show_mode=False; return "hide (simulation panel OFF)"
     if a=="critical on": _state.critical=True; return "critical ON"
     if a=="critical off": _state.critical=False; return "critical OFF"
     if a=="hard-break on": _state.hard_break=True; return "hard-break ON"
@@ -170,6 +181,7 @@ def _cmd(a="", **_):
 def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_llm_call", _on_post_llm_call)
+    ctx.register_hook("transform_llm_output", _on_transform_llm_output)
     ctx.register_tool(
         name="reason_deeper", toolset="meboya",
         schema={"type":"function","function":{"name":"reason_deeper",
@@ -183,4 +195,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.5.9 loaded (DOGA-style)")
+    logger.info("meboya v2.6.0 loaded (DOGA-style)")
