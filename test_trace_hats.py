@@ -39,11 +39,11 @@ try:
 except Exception as e:
     errors.append(f"CRASH: _on_post_llm_call raised {e}")
 
-# 3. Verify _cmd('status') contains version
+# 3. Verify _cmd('status') contains a semantic version (invariant, not snapshot)
 try:
     status = _cmd('status')
-    if "v2.5.3" not in status:
-        errors.append(f"FAIL: Status missing version string")
+    if not re.search(r"Meboya v\d+\.\d+\.\d+", status):
+        errors.append("FAIL: Status missing semantic version string")
 except Exception as e:
     errors.append(f"CRASH: _cmd('status') raised {e}")
 
