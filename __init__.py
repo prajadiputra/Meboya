@@ -65,7 +65,7 @@ CRITICAL_INSTRUCTION = ("Begin your response with <world_model>Reasoning:</world
 # ── STATE ──
 class _State:
     enabled=True; depth=3; last_msg=""; complexity="medium"; critical=True
-    hats_enabled=True; auto_depth=True; max_recursion=3
+    hats_enabled=True; auto_depth=True; max_recursion=3; show_mode=True
     rd_calls=0; rd_ignored=0; hard_break=False; mc_iters=10000
 _state = _State()
 
@@ -74,7 +74,14 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     if not _state.enabled: return None
     _state.last_msg = user_message
     if len(user_message.strip()) < 5 and not is_first_turn: return None
-    guide = CRITICAL_INSTRUCTION if _state.critical else INSTRUCTION
+    if not _state.show_mode:
+        guide = ("Answer directly with [DECISION] only:\n- Decision:\n- Key Reason:\n"
+                 "- Risk Accepted:\n- Action:\nThen ask one natural follow-up question.")
+    elif not _state.hats_enabled:
+        guide = ("Answer directly with concise analysis, then:\n[DECISION]\n- Decision:\n"
+                 "- Key Reason:\n- Risk Accepted:\n- Action:\nThen ask one natural follow-up question.")
+    else:
+        guide = CRITICAL_INSTRUCTION if _state.critical else INSTRUCTION
     c,_ = _detect_complexity(user_message); _state.complexity = c
     _state.hard_break = False
     injection = f"\n\n---MEBOYA: {guide}"
@@ -114,11 +121,12 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.5.8\n"
+        return (f"Meboya v2.5.9\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
                 f"  Hats: {'ON' if _state.hats_enabled else 'OFF'}\n"
+                f"  Show: {'ON' if _state.show_mode else 'OFF (decision only)'}\n"
                 f"  Critical: {'ON' if _state.critical else 'OFF'}\n"
                 f"  Mnemosyne: {'Y' if MNEMOSYNE_AVAILABLE else 'N'}\n"
                 f"  MC iters: {_state.mc_iters:,}\n"
@@ -138,6 +146,8 @@ def _cmd(a="", **_):
         except: return "depth 1|2|3"
     if a=="hats on": _state.hats_enabled=True; return "hats ON"
     if a=="hats off": _state.hats_enabled=False; return "hats OFF"
+    if a=="show": _state.show_mode=True; return "show (full output)"
+    if a=="hide": _state.show_mode=False; return "hide (decision only)"
     if a=="critical on": _state.critical=True; return "critical ON"
     if a=="critical off": _state.critical=False; return "critical OFF"
     if a=="hard-break on": _state.hard_break=True; return "hard-break ON"
@@ -155,7 +165,7 @@ def _cmd(a="", **_):
         if not MNEMOSYNE_AVAILABLE: return "No Mnemosyne"
         e=_recall(_state.last_msg or "recent",3)
         return "Past:\n"+"\n".join(f"[{x.get('metadata',{}).get('goal_type','?')}] {x.get('content','')[:80]}" for x in e) if e else "empty"
-    return "meboya: on|off|status|auto|manual|depth|hats|critical|memory|max_recursion|mc|hard-break|reset|recall"
+    return "meboya: on|off|status|auto|manual|depth|hats|show|hide|critical|memory|max_recursion|mc|hard-break|reset|recall"
 
 def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
@@ -173,4 +183,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.5.8 loaded (DOGA-style)")
+    logger.info("meboya v2.5.9 loaded (DOGA-style)")
