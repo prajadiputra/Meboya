@@ -65,6 +65,7 @@ CRITICAL_INSTRUCTION = ("Begin your response with <world_model>Reasoning:</world
 # ── STATE ──
 class _State:
     enabled=True; depth=3; last_msg=""; complexity="medium"; critical=True
+    hats_enabled=True; auto_depth=True; max_recursion=3
     rd_calls=0; rd_ignored=0; hard_break=False; mc_iters=10000
 _state = _State()
 
@@ -112,30 +113,49 @@ def _cmd(a="", **_):
     if a=="on": _state.enabled=True; return "ON"
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
-        return (f"Meboya v2.5.7\n"
+        mode = "auto" if _state.auto_depth else "manual"
+        return (f"Meboya v2.5.8\n"
                 f"  Enabled: {_state.enabled}\n"
+                f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
+                f"  Hats: {'ON' if _state.hats_enabled else 'OFF'}\n"
                 f"  Critical: {'ON' if _state.critical else 'OFF'}\n"
                 f"  Mnemosyne: {'Y' if MNEMOSYNE_AVAILABLE else 'N'}\n"
+                f"  MC iters: {_state.mc_iters:,}\n"
+                f"  Max recursion: {_state.max_recursion}\n"
                 f"  reason_deeper: {_state.rd_calls} calls, {_state.rd_ignored} ignored\n"
-                f"  Hard-break: {'ON' if _state.hard_break else 'OFF'}\n"
-                f"  MC iters: {_state.mc_iters:,}")
+                f"  Hard-break: {'ON' if _state.hard_break else 'OFF'}")
+    if a=="auto": _state.auto_depth=True; return "auto (depth auto-selected per query)"
+    if a.startswith("manual"):
+        try:
+            lvl=a.split()[1].lower()
+            m={"low":1,"medium":2,"high":3}
+            if lvl in m: _state.auto_depth=False; _state.depth=m[lvl]; return f"manual {lvl} (depth={m[lvl]})"
+        except: pass
+        return "manual low|medium|high"
     if a.startswith("depth"):
-        try: d=int(a.split()[1]); assert 1<=d<=3; _state.depth=d; return f"depth {d}"
+        try: d=int(a.split()[1]); assert 1<=d<=3; _state.depth=d; _state.auto_depth=False; return f"depth {d}"
         except: return "depth 1|2|3"
-    if a=="critical on": _state.critical=True; return "ON"
-    if a=="critical off": _state.critical=False; return "OFF"
+    if a=="hats on": _state.hats_enabled=True; return "hats ON"
+    if a=="hats off": _state.hats_enabled=False; return "hats OFF"
+    if a=="critical on": _state.critical=True; return "critical ON"
+    if a=="critical off": _state.critical=False; return "critical OFF"
     if a=="hard-break on": _state.hard_break=True; return "hard-break ON"
     if a=="hard-break off": _state.hard_break=False; return "hard-break OFF"
+    if a.startswith("max_recursion"):
+        try: r=int(a.split()[1]); assert 1<=r<=5; _state.max_recursion=r; return f"max_recursion {r}"
+        except: return "max_recursion 1-5"
     if a.startswith("mc"):
         try: i=int(a.split()[1]); assert 1000<=i<=50000; _state.mc_iters=i; return f"mc {i}"
         except: return "mc 1000-50000"
+    if a=="memory on": return "memory: controlled via config.yaml"
+    if a=="memory off": return "memory: disabled via config.yaml"
     if a=="reset": _state.rd_calls=_state.rd_ignored=0; _state.hard_break=False; return "reset"
     if a=="recall":
         if not MNEMOSYNE_AVAILABLE: return "No Mnemosyne"
         e=_recall(_state.last_msg or "recent",3)
         return "Past:\n"+"\n".join(f"[{x.get('metadata',{}).get('goal_type','?')}] {x.get('content','')[:80]}" for x in e) if e else "empty"
-    return "meboya: on|off|status|depth|critical|hard-break|mc|reset|recall"
+    return "meboya: on|off|status|auto|manual|depth|hats|critical|memory|max_recursion|mc|hard-break|reset|recall"
 
 def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
@@ -153,4 +173,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.5.7 loaded (DOGA-style)")
+    logger.info("meboya v2.5.8 loaded (DOGA-style)")
