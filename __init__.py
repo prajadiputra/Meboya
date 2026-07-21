@@ -132,7 +132,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.6.0\n"
+        return (f"Meboya v2.6.1\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
@@ -184,15 +184,15 @@ def register(ctx):
     ctx.register_hook("transform_llm_output", _on_transform_llm_output)
     ctx.register_tool(
         name="reason_deeper", toolset="meboya",
-        schema={"type":"function","function":{"name":"reason_deeper",
+        schema={"name":"reason_deeper",
             "description":"Self-critique with hat lens. Hard-break after 3 ignored.",
             "parameters":{"type":"object","properties":{
                 "level":{"type":"integer","default":2},
                 "focus":{"type":"string","enum":["black hat","green hat","red hat","blue hat"],"default":"black hat"},
                 "scenarios":{"type":"string","default":""}},
-            "required":[]}}},
+            "required":[]}},
         handler=lambda a,**kw: reason_deeper(
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.6.0 loaded (DOGA-style)")
+    logger.info("meboya v2.6.1 loaded (DOGA-style)")
