@@ -268,6 +268,55 @@ Response delivered to user (show: full, hide: decision-only)
 
 ---
 
+## Knowledge Graph
+
+Generated with [graphify](https://github.com/Graphify-Labs/graphify) — local AST parsing, **0 LLM tokens**. Artifacts in [`graphify-out/`](graphify-out/) (`graph.json`, `graph.html`, [`GRAPH_REPORT.md`](graphify-out/GRAPH_REPORT.md)).
+
+**25 nodes · 41 edges · 5 communities · 90% EXTRACTED / 10% INFERRED**
+
+### God Nodes (core abstractions, by degree)
+
+| # | Node | Edges | Role |
+|---|---|---|---|
+| 1 | `register()` | 7 | Entry point — mounts 3 hooks + tool + command |
+| 2 | `_on_post_llm_call()` | 5 | Detect complexity + `_remember()` + hard-break tracking |
+| 3 | `_Ctx` | 5 | Test harness context (register_hook/tool/command) |
+| 4 | `_format_show_hide()` | 4 | Strip `<world_model>`, keep `[DECISION]` |
+| 5 | `_on_pre_llm_call()` | 4 | Inject hat guide, auto-depth |
+| 6 | `_on_transform_llm_output()` | 4 | Show/hide dispatch |
+| 7 | `reason_deeper()` | 4 | Recursive self-critique tool |
+| 8 | `_cmd()` | 4 | `/meboya` command handler |
+
+### Communities
+
+| Community | Cohesion | Members |
+|---|---|---|
+| **Hooks & State** (`__init__.py`) | 0.33 | `_cmd`, `_detect_complexity`, `_on_pre/post_llm_call`, `_recall`, `_remember`, `_State` |
+| **Show/Hide** (`register`) | 0.40 | `register`, `_format_show_hide`, `_on_transform_llm_output` |
+| **Reasoning Tools** (`test_trace_hats.py`) | 0.67 | `monte_carlo_simulate`, `reason_deeper` |
+
+### Flow (register → hooks)
+
+```
+register()
+  ├─indirect_call→ _on_pre_llm_call()        (bridges community 0 → 1)
+  ├─indirect_call→ _on_post_llm_call()
+  ├─indirect_call→ _on_transform_llm_output()
+  └─call→         reason_deeper()            (bridges community 3 → 1)
+
+_on_transform_llm_output() ─call→ _format_show_hide()
+_on_post_llm_call()        ─call→ _detect_complexity(), _remember()
+_cmd()                     ─call→ _recall()
+```
+
+Rebuild after code changes:
+
+```bash
+graphify ~/.hermes/plugins/meboya --code-only && graphify cluster-only ~/.hermes/plugins/meboya
+```
+
+---
+
 ## Mnemosyne Memory (Optional)
 
 ```bash
