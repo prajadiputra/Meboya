@@ -49,17 +49,26 @@ def monte_carlo_simulate(scenarios, iterations=10000, seed=None):
             "winner":lbs[idx[0][0]],"confidence":round(idx[0][1]-(idx[1][1] if len(idx)>1 else 0),4),
             "iterations":iters}
 
+# ── GUARDRAIL: fact verification discipline ──
+VERIFY_RULE = ("CRITICAL RULE: NO ASSUMPTIONS. Every [WHITE] fact MUST be supported by "
+               "verified data: documentation, tool output, DB query, or direct observation. "
+               "NEVER infer meaning of prefixes/names/terms from pattern-matching or memory. "
+               "If uncertain, state '🔍 unknown — needs verification' — do not guess.")
+
 # ── INSTRUCTION (DOGA-style) ──
 INSTRUCTION = ("Put [WHITE] facts, [BLACK] risks, [YELLOW] benefits, [GREEN] alternatives, "
                "and [BLUE] synthesis inside <world_model>...</world_model>, then output:\n"
                "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
-               "After [DECISION], ask one natural follow-up question.")
+               "After [DECISION], ask one natural follow-up question.\n\n"
+               f"{VERIFY_RULE}")
 
-CRITICAL_INSTRUCTION = ("Put [WHITE] facts, [BLACK] risks with ├ CRITICAL: pushback, [RED] gut reaction, "
+CRITICAL_INSTRUCTION = ("Put [WHITE] facts (VERIFIED ONLY — see rule below), [BLACK] risks with ├ CRITICAL: pushback, "
+                        "[RED] gut reaction, "
                         "[YELLOW] benefits, [GREEN] alternatives with ├ CRITICAL: pushback, and [BLUE] synthesis "
                         "with ├ CRITICAL: pushback inside <world_model>...</world_model>, then output:\n"
                         "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
-                        "After [DECISION], ask one natural follow-up question.")
+                        "After [DECISION], ask one natural follow-up question.\n\n"
+                        f"{VERIFY_RULE}")
 
 # ── STATE ──
 class _State:
@@ -106,11 +115,11 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     return injection
 
 def _on_post_llm_call(response_text="", **_):
-    if not _state.enabled or not response_text: return
+    if not _state.enabled: return
     if _state.last_msg:
         c,_=_detect_complexity(_state.last_msg)
         _remember(_state.last_msg,0.7,md={"complexity":c,"depth":_state.depth})
-    if _state.rd_calls>0 and "reason_deeper" not in response_text:
+    if _state.rd_calls>0 and response_text and "reason_deeper" not in response_text:
         _state.rd_ignored+=1
         if _state.rd_ignored>=3: _state.hard_break=True; logger.warning("meboya: HARD BREAK")
 
@@ -141,7 +150,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.6.3\n"
+        return (f"Meboya v2.7.0\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
@@ -204,4 +213,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.6.3 loaded (DOGA-style)")
+    logger.info("meboya v2.7.0 loaded (DOGA-style)")
