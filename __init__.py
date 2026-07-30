@@ -101,6 +101,9 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     if not _state.enabled: return None
     _state.last_msg = user_message
     if len(user_message.strip()) < 5 and not is_first_turn: return None
+    # Skip DOGA framework if agy-router already handled this request
+    if "[Original request routed via agy-router:]" in user_message:
+        return None
     if not _state.hats_enabled:
         guide = ("Put concise analysis inside <world_model>...</world_model>, then output:\n"
                  "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
