@@ -461,7 +461,6 @@ python3 test_trace_hats.py   # must pass before every commit
 python3 test_socratic.py     # must pass before every commit
 ```
 
-Contributions welcome — open a [PR](https://github.com/prajadiputra/Meboya/pulls) or [issue](https://github.com/prajadiputra/Meboya/issues).
 
 ---
 
