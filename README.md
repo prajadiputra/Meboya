@@ -1,11 +1,32 @@
 # Meboya 🔍
 
-> **Bali: *meboya* = "questioning everything"**  
-> Structured reasoning plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — Six Thinking Hats + Critical pushback + DOGA-compatible show/hide + Monte Carlo simulation + recursive self-critique.
+> **Bali: *meboya* = "questioning everything"** — Structured reasoning layer for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Six Thinking Hats + Critical pushback + Socratic question bank + Monte Carlo simulation — all in a single-file plugin.
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-2.7.6-green)](https://github.com/prajadiputra/Meboya/releases)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](test_trace_hats.py)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/prajadiputra/Meboya/pulls)
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [How Output Looks](#how-output-looks)
+- [Commands](#commands-complete-reference)
+- [Socratic Enhancement](#socratic-enhancement-)
+- [Built-in Tool: `reason_deeper`](#built-in-tool-reason_deeper)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Knowledge Graph](#knowledge-graph)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [License](#license)
+- [Credits](#credits)
 
 ---
 
@@ -13,75 +34,27 @@
 
 | Feature | Description |
 |---|---|
-| 🎩 **Six Thinking Hats** | [WHITE] facts → [BLACK] risks → [RED] gut → [YELLOW] benefits → [GREEN] alternatives → [BLUE] synthesis |
+| 🎩 **Six Thinking Hats** | `[WHITE]` facts → `[BLACK]` risks → `[RED]` gut → `[YELLOW]` benefits → `[GREEN]` alternatives → `[BLUE]` synthesis |
 | 🔍 **Critical Mode** (ON by default) | Adversarial pushback with `├ CRITICAL:` sub-points on BLACK, GREEN, BLUE |
-| 📊 **Decision Block** | MANDATORY [DECISION] with Decision, Key Reason, Risk Accepted, Action |
+| 📊 **Decision Block** | MANDATORY `[DECISION]` with Decision, Key Reason, Risk Accepted, Action |
 | 👁️ **Show / Hide** (DOGA-style) | Toggle trace visibility via `transform_llm_output` — reasoning continues, panel hidden |
 | 🎲 **Monte Carlo Simulation** | Pure Python probability engine (1K–50K iterations, 0 LLM tokens) |
-| 🔄 **Reason Deeper** (recursive self-critique) | Model can invoke `reason_deeper` tool to self-audit with hat lens |
-| 🛑 **Hard-Break** | Auto-blocks `reason_deeper` after 3 ignored calls; manual on/off available |
-| ⚡ **Auto-Depth** | Complexity detection per query (low/medium/high, 0 LLM tokens) |
+| 🔄 **Reason Deeper** | Model can invoke `reason_deeper` tool for recursive self-critique with hat lens |
+| 🛑 **Hard-Break** | Auto-blocks `reason_deeper` after 3 consecutive ignored calls |
+| ⚡ **Auto-Depth** | Per-query complexity detection (concise / hats / deep, 0 LLM tokens) |
+| ❓ **Socratic Enhancement** | Auto-injects curated senior-engineer question bank (15 domains) for build/design/migrate/review tasks |
 | 🧠 **Mnemosyne Memory** (optional) | Recalls past queries, saves goal patterns across sessions |
 | 🪶 **Zero Hard Dependencies** | Pure Python stdlib — Mnemosyne optional |
-| ❓ **Socratic Enhancement** | Auto-injects a curated senior-engineer question bank (15 domains) when the task signals build/design/migrate/review work |
 
 ---
 
-## Socratic Enhancement 🧠
+## Requirements
 
-**Auto-injected senior-engineer question bank** — inspired by [**Socratic**](https://github.com/m4vic/socratic) (MIT), a self-interrogation skill for agentic AI by [m4vic](https://github.com/m4vic). It ships **697 questions across 15 engineering domains**, distilled from Kleppmann, Nygard, Evans, Ousterhout, Feathers & Khorikov — the questions a senior engineer asks before writing code.
-
-### Why
-
-When you ask Meboya to build, design, migrate, or review something, the LLM normally self-interrogates from **its own memory** — which has blind spots. Socratic loads a **curated question bank** directly into the prompt so the LLM has to confront the *right* questions, not just the ones it happens to remember.
-
-### How it works
-
-| Step | What happens |
-|------|-------------|
-| 1. Detect | `pre_llm_call` scans your message for build/design/migrate/review signals (`bikin`, `bangun`, `migrasi`, `design`, `review`, …) |
-| 2. Map | A signal-word map selects the relevant engineering domains (e.g. `API` + `auth` → 04-api + 05-security) |
-| 3. Inject | The question files for those domains (Core mode, ~600 tokens) are appended to the prompt — **no tool call, no LLM round-trip** |
-| 4. Self-answer | LLM silently answers the questions, folds them into its decision |
-| 5. Contract | The LLM emits a `Domains considered / Self-answered / Assumed / Open questions / Risks / Plan` contract **inside `<world_model>`** before `[DECISION]` |
-
-### Why it's better than before
-
-| | Before (Meboya alone) | After (Meboya + Socratic) |
-|---|---|---|
-| Question source | LLM memory — blind spots | 697-question bank, curated from systems books |
-| Coverage | Whatever the model recalls | 15 engineering domains, Core/Full depth |
-| Load | Always the same guide | Only when task signals engineering work (~600 tokens) |
-| Output | Hats → [DECISION] | Hats → contract → [DECISION] |
-| Chat turns | — | 0 extra tokens (no trigger → no injection) |
-
-### The contract output
-
-```
-Domains considered:   requirements, api, security, testing
-Self-answered:        JWT over session (stateless, existing infra), scoped tokens
-Assumed (flag if wrong): single-region; no PII in claims
-Open questions for you: 1. Is 30-day token lifetime acceptable?
-Top risks:            no refresh-token rotation — add if long-lived sessions needed
-Plan:                 middleware → issuer → verify → test
-```
-
-The point is not to ask *more* questions — it's to ask the **most useful** ones at the right time without burning context. Non-build turns cost **0 extra tokens**; build turns cost ~600 tokens (measured with `tiktoken o200k_base`).
-
-### Telemetry
-
-`/meboya status` tracks real-world effectiveness:
-
-```
-Socratic: ON
-  triggered:      12 turns
-  contract emitted: 10/12 (83%)
-  tokens injected: ~7,400
-```
-
-- **Trigger rate** — how often engineering tasks appear
-- **Contract rate** — of triggered turns, how many actually emit the contract (≥50% = working)
-- **Tokens injected** — total context cost
+| Requirement | Version |
+|---|---|
+| [Hermes Agent](https://github.com/NousResearch/hermes-agent) | any recent release (plugin API: `register()` + hooks) |
+| Python | 3.10+ |
+| Mnemosyne | optional — auto-detected at runtime |
 
 ---
 
@@ -110,13 +83,38 @@ Restart:
 hermes gateway restart
 ```
 
-### Verify
+### Update
 
+```bash
+hermes plugins update meboya
+hermes gateway restart
 ```
+
+Or fresh re-install:
+
+```bash
+rm -rf ~/.hermes/plugins/meboya
+hermes plugins install prajadiputra/Meboya
+hermes plugins enable meboya
+hermes gateway restart
+```
+
+---
+
+## Quick Start
+
+```text
+# 1. Verify it's live
 /meboya status
+
+# 2. Just chat — hats appear automatically
+Bandingkan Redis vs Memcached
+
+# 3. Build/design tasks get the full Socratic treatment
+Bikin rencana deploy service ke EKS pakai helm
 ```
 
-Expected output:
+Expected `/meboya status`:
 
 ```
 Meboya v2.7.6
@@ -139,33 +137,13 @@ Meboya v2.7.6
 
 ---
 
-## Update
-
-```bash
-hermes plugins update meboya
-hermes gateway restart
-```
-
-Or fresh re-install:
-
-```bash
-rm -rf ~/.hermes/plugins/meboya
-hermes plugins install prajadiputra/Meboya
-hermes plugins enable meboya
-hermes gateway restart
-```
-
----
-
 ## How Output Looks
 
-### Show (default)
+### Show (default) — full hats + optional Socratic contract
 
-Full hats visible (inside `<world_model>` per injection):
-
-```
+```text
 <world_model>
-[WHITE] facts
+[WHITE] facts (verified only)
 [BLACK] risks
   ├ CRITICAL: hardest pushback
 [RED] gut reaction
@@ -174,6 +152,14 @@ Full hats visible (inside `<world_model>` per injection):
   ├ CRITICAL: what's the opposite approach?
 [BLUE] synthesis
   ├ CRITICAL: second-order effects?
+
+— CONTRACT — (only when Socratic triggers)
+- Domains considered: infra, testing, observability
+- Self-answered: ...
+- Assumed (flag if wrong): ...
+- Open questions for you (0-3): ...
+- Top risks: ...
+- Plan: ...
 </world_model>
 
 [DECISION]
@@ -185,11 +171,9 @@ Full hats visible (inside `<world_model>` per injection):
 Dynamic follow-up question
 ```
 
-### Hide
+### Hide — decision only (reasoning still runs)
 
-Decision-only — reasoning still runs:
-
-```
+```text
 [DECISION]
 - Decision: ...
 - Key Reason: ...
@@ -197,6 +181,52 @@ Decision-only — reasoning still runs:
 - Action: ...
 
 Dynamic follow-up question
+```
+
+### Real-world example (build query, show mode)
+
+From a live test with a deploy-plan request:
+
+```text
+<world_model>
+[WHITE]
+- EKS PRD = 876683363342, STG = 372232666016 (verified memory).
+- Nodes CAST AI-managed. Istio mesh + VPA.
+
+[BLACK]
+├ CRITICAL: chart belum disebut, jangan tebak nama service/chart.
+├ CRITICAL: tanpa deployment strategy, rollback bisa salah arah.
+- Image tag immutable = Git SHA, bukan :latest.
+
+[RED]
+Chart unknown → rencana harus generik dulu.
+
+[YELLOW]
+Helm --atomic rollback otomatis. SHA tag = traceable.
+
+[GREEN]
+Alternatif: repo sendiri, Bitnami, atau ArgoCD-managed?
+├ CRITICAL: jangan asumsi ArgoCD di cluster ini.
+
+[BLUE]
+3 langkah: (1) chart, (2) git-SHA tag, (3) helm --atomic rollback.
+
+— CONTRACT —
+- Domains considered: infra, testing, observability
+- Self-answered: image tagging = git SHA immutable; rollback = helm --atomic
+- Assumed (flag if wrong): service name belum tahu; default rolling strategy. FLAG: kalau perlu canary/DB migration, langkah bertambah.
+- Open questions for you (1): nama service + chart?
+- Top risks: chart salah pilih; rollback tanpa DB compat
+- Plan: terima nama service & chart → keluar perintah helm exact
+</world_model>
+
+[DECISION]
+- Decision: Rencana deploy helm 3 langkah ringkas.
+- Key Reason: helm --atomic rollback otomatis + SHA tag traceable.
+- Risk Accepted: asumsi rolling strategy default; DB migration perlu pre/post hook.
+- Action: kasih nama service + chart → saya isi perintah helm + values override.
+
+Nama service + chart-nya apa? Ada DB migration saat deploy?
 ```
 
 ---
@@ -262,6 +292,47 @@ Dynamic follow-up question
 
 ---
 
+## Socratic Enhancement 🧠
+
+**Auto-injected senior-engineer question bank** — inspired by [**Socratic**](https://github.com/m4vic/socratic) (MIT), a self-interrogation skill for agentic AI by [m4vic](https://github.com/m4vic). It ships **697 questions across 15 engineering domains**, distilled from Kleppmann, Nygard, Evans, Ousterhout, Feathers & Khorikov.
+
+### Why
+
+When you ask Meboya to build, design, migrate, or review something, the LLM normally self-interrogates from **its own memory** — which has blind spots. Socratic loads a **curated question bank** directly into the prompt so the LLM has to confront the *right* questions, not just the ones it happens to remember.
+
+### How it works
+
+| Step | What happens |
+|------|-------------|
+| 1. Detect | `pre_llm_call` scans your message for build/design/migrate/review signals (`bikin`, `bangun`, `migrasi`, `design`, `review`, …) |
+| 2. Map | A signal-word map selects the relevant engineering domains (e.g. `API` + `auth` → 04-api + 05-security) |
+| 3. Inject | The question files for those domains are appended to the prompt — **no tool call, no LLM round-trip** |
+| 4. Self-answer | LLM silently answers the questions, folds them into its decision |
+| 5. Contract | The LLM emits a `Domains considered / Self-answered / Assumed / Open questions / Risks / Plan` contract **inside `<world_model>`** before `[DECISION]` |
+
+### Why it's better than before
+
+| | Before (Meboya alone) | After (Meboya + Socratic) |
+|---|---|---|
+| Question source | LLM memory — blind spots | 697-question bank, curated from systems books |
+| Coverage | Whatever the model recalls | 15 engineering domains |
+| Load | Always the same guide | Only when task signals engineering work |
+| Output | Hats → [DECISION] | Hats → contract → [DECISION] |
+| Chat turns | — | 0 extra tokens (no trigger → no injection) |
+
+### Telemetry
+
+`/meboya status` tracks real-world effectiveness:
+
+```
+Socratic: ON
+  triggered:      12 turns
+  contract emitted: 10/12 (83%)
+  tokens injected: ~7,400
+```
+
+---
+
 ## Built-in Tool: `reason_deeper`
 
 When depth=3, the model can invoke `reason_deeper` for recursive self-critique.
@@ -270,7 +341,7 @@ When depth=3, the model can invoke `reason_deeper` for recursive self-critique.
 
 | Parameter | Type | Default | Values |
 |---|---|---|---|
-| `level` | integer | 2 | 1-3 (intensity) |
+| `level` | integer | 2 | 1-3 (clamped by `max_recursion`) |
 | `focus` | string | `"black hat"` | `black hat`, `green hat`, `red hat`, `blue hat` |
 | `scenarios` | string | `""` | JSON list of `[label, probability]` pairs for Monte Carlo |
 
@@ -291,32 +362,20 @@ MC(20000): Winner=option_a, conf=20.0%
 [end]
 ```
 
-**Hard-break:** After 3 consecutive calls where the model ignores `reason_deeper` output, hard-break auto-activates and blocks further calls. Reset with `/meboya reset`.
-
----
-
-## Critical Mode (Default ON)
-
-Critical mode adds `├ CRITICAL:` sub-points to BLACK, GREEN, and BLUE hats:
-
-| Hat | Standard | Critical |
-|---|---|---|
-| [BLACK] | Risks, edge cases | + "Is premise valid? Hidden costs?" |
-| [RED] | Gut reaction | (unchanged — already subjective) |
-| [GREEN] | Alternatives | + "What's the OPPOSITE approach?" |
-| [BLUE] | Synthesis | + "Best answer or easiest? 2nd-order effects?" |
+**Hard-break:** After 3 consecutive turns where the model had `reason_deeper` available but didn't call it, hard-break activates and blocks further calls. Reset with `/meboya reset`.
 
 ---
 
 ## Architecture
 
-```
+```text
 User message
   │
   ▼
 pre_llm_call hook:
   ├── Detect complexity → auto-depth
-  ├── Inject thinking guide (Six Hats + Critical + Decision)
+  ├── Inject thinking guide (hats + critical + decision)
+  ├── Socratic question bank (if build/design trigger)
   └── Return injected prompt with ---MEBOYA: marker
   │
   ▼
@@ -330,13 +389,31 @@ transform_llm_output hook:
   │
   ▼
 post_llm_call hook:
-  ├── Detect goal type from response
+  ├── Socratic telemetry (contract detected on raw pre-strip text)
   ├── Save to Mnemosyne (if available)
-  └── Track reason_deeper ignore count → hard-break
+  └── Track reason_deeper ignore streak → hard-break
   │
   ▼
-Response delivered to user (show: full, hide: decision-only)
+Response delivered (show: full, hide: decision-only)
 ```
+
+---
+
+## Configuration
+
+All configuration is via `/meboya` subcommands (see [Commands](#commands-complete-reference)). State is in-memory per session.
+
+| Setting | Default | Command |
+|---|---|---|
+| enabled | `True` | `/meboya on\|off` |
+| depth | `3` (auto) | `/meboya auto\|manual\|depth` |
+| hats | `True` | `/meboya hats on\|off` |
+| show mode | `True` | `/meboya show\|hide` |
+| critical | `True` | `/meboya critical on\|off` |
+| max_recursion | `3` | `/meboya max_recursion 1-5` |
+| MC iterations | `10000` | `/meboya mc 1000-50000` |
+| socratic | `True` | `/meboya socratic on\|off` |
+| hard-break | `False` | `/meboya hard-break on\|off` |
 
 ---
 
@@ -344,7 +421,7 @@ Response delivered to user (show: full, hide: decision-only)
 
 Generated with [graphify](https://github.com/Graphify-Labs/graphify) — local AST parsing, **0 LLM tokens**. Artifacts in [`graphify-out/`](graphify-out/) (`graph.json`, `graph.html`, [`GRAPH_REPORT.md`](graphify-out/GRAPH_REPORT.md)).
 
-**31 nodes · 49 edges · 9 communities · 92% EXTRACTED / 8% INFERRED** (built from commit `ee293bf`)
+**31 nodes · 49 edges · 9 communities · 92% EXTRACTED / 8% INFERRED**
 
 ### God Nodes (core abstractions, by degree)
 
@@ -353,7 +430,7 @@ Generated with [graphify](https://github.com/Graphify-Labs/graphify) — local A
 | 1 | `register()` | 7 | Entry point — mounts 3 hooks + tool + command |
 | 2 | `_on_post_llm_call()` | 6 | Detect complexity + `_remember()` + hard-break + socratic telemetry |
 | 3 | `_on_pre_llm_call()` | 5 | Inject hat guide + socratic question bank |
-| 4 | `_Ctx` | 5 | Test harness context (register_hook/tool/command) |
+| 4 | `_Ctx` | 5 | Test harness context |
 | 5 | `_socratic_injection()` | 4 | Signal detection + domain mapping + question-bank injection |
 | 6 | `_format_show_hide()` | 4 | Strip `<world_model>`, keep `[DECISION]` |
 | 7 | `_on_transform_llm_output()` | 4 | Show/hide dispatch |
@@ -361,63 +438,12 @@ Generated with [graphify](https://github.com/Graphify-Labs/graphify) — local A
 | 9 | `_cmd()` | 4 | `/meboya` command handler |
 | 10 | `_detect_complexity()` | 3 | Auto-depth heuristic |
 
-### Communities (top 4 of 9)
-
-| Community | Cohesion | Members |
-|---|---|---|
-| **Commands & State** (`__init__.py`) | 0.50 | `_cmd`, `_recall`, `_State` |
-| **Reasoning Tools** (`test_trace_hats.py`) | 0.60 | `monte_carlo_simulate`, `reason_deeper`, `register` |
-| **Show/Hide** | 0.50 | `_format_show_hide`, `_on_transform_llm_output` |
-| **Socratic** | 0.67 | `_socratic_injection`, `_socratic_read` |
-
-5 thin communities (<3 nodes) omitted — see `graphify-out/GRAPH_REPORT.md` full report.
-
-### Flow (register → hooks)
-
-```
-register()
-  ├─indirect_call→ _on_pre_llm_call()        (bridges community 6 → 1)
-  ├─indirect_call→ _on_post_llm_call()
-  ├─indirect_call→ _on_transform_llm_output()
-  └─call→         reason_deeper()            (bridges community 3 → 1)
-
-_on_transform_llm_output() ─call→ _format_show_hide()
-_on_post_llm_call()        ─call→ _detect_complexity(), _remember()
-_cmd()                     ─call→ _recall()
-```
-
 Rebuild after code changes:
 
 ```bash
-# From repo root
 graphify . --code-only --out graphify-out
-graphify cluster-only /tmp/meboya-git
+graphify cluster-only .
 ```
-
----
-
-## Mnemosyne Memory (Optional)
-
-```bash
-pip install mnemosyne-memory
-```
-
-Meboya auto-detects Mnemosyne at runtime:
-
-| Without Mnemosyne | With Mnemosyne |
-|---|---|
-| Works standalone | Recalls past query patterns |
-| No memory across sessions | Saves goal_type, complexity, depth |
-| `/meboya recall` = empty | Shows past goal patterns |
-| Status = `N` | Status = `Y` |
-
----
-
-## Origin
-
-Inspired by **[DOGA](https://github.com/0z1-ghb/doga-hermes)** — the original Hermes thinking layer plugin by 0z1-ghb.
-
-Meboya ports DOGA's reasoning architecture (show/hide via `transform_llm_output`, Monte Carlo, recursive reasoning, Six Hats) while adding critical mode, hard-break, and auto-depth — all in a single-file plugin with zero hard dependencies.
 
 ---
 
@@ -426,7 +452,7 @@ Meboya ports DOGA's reasoning architecture (show/hide via `transform_llm_output`
 | Symptom | Fix |
 |---|---|
 | `Unknown command: /meboya` | `hermes plugins enable meboya` + restart gateway |
-| No hat tags in response | Check plugin enabled + not disabled via `hats off`. Restart gateway — fresh session picks up new guide |
+| No hat tags in response | Check plugin enabled + not disabled via `hats off`. Restart gateway |
 | Hats never appear in CLI | Ensure no other plugin strips/redirects the request (e.g. old agy-router). Remove conflicting plugins, restart |
 | `[Thinking Guide]` / `[PAST CONTEXT]` in output | Update to v2.4.3+ (silent wrappers) |
 | Hide still shows hats | Update to v2.6.3+ (fallback strip from [DECISION]) |
@@ -443,14 +469,17 @@ Meboya ports DOGA's reasoning architecture (show/hide via `transform_llm_output`
 See [`DEVELOP_GUIDE.md`](DEVELOP_GUIDE.md) for boundary rules, release checklist, and test harness.
 
 ```bash
-python3 test_trace_hats.py  # must pass before every commit
+python3 test_trace_hats.py   # must pass before every commit
+python3 test_socratic.py     # must pass before every commit
 ```
+
+Contributions welcome — open a [PR](https://github.com/prajadiputra/Meboya/pulls) or [issue](https://github.com/prajadiputra/Meboya/issues).
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ---
 
