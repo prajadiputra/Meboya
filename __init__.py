@@ -164,6 +164,7 @@ class _State:
     hats_enabled=True; auto_depth=True; max_recursion=3; show_mode=True
     rd_calls=0; rd_ignored=0; hard_break=False; mc_iters=10000
     soc_triggered=0; soc_contract=0; soc_tokens_in=0
+    last_raw_response=""
 _state = _State()
 
 # ── HOOKS ──
@@ -236,14 +237,17 @@ def _on_post_llm_call(response_text="", **_):
         c,_=_detect_complexity(_state.last_msg)
         _remember(_state.last_msg,0.7,md={"complexity":c,"depth":_state.depth})
         # ── SOCRATIC effectiveness telemetry ──
+        # fix#13: check contract on raw (pre-transform) text, not post-strip
+        raw = _state.last_raw_response
         injected = bool(_socratic_injection(_state.last_msg))
         if injected:
             _state.soc_triggered += 1
-            contract_out = any(k in (response_text or "") for k in
+            contract_out = any(k in (raw or "") for k in
                                ("Domains considered", "Self-answered", "Assumed (flag if wrong)",
                                 "Open questions", "Top risks", "Plan:"))
             _state.soc_contract += 1 if contract_out else 0
             _state.soc_tokens_in += len(_socratic_injection(_state.last_msg)) // 4
+            _state.last_raw_response = ""  # consume
             logger.info("socratic: triggered=%s contract=%s", _state.soc_triggered, contract_out)
     # Hard-break: track ONLY consecutive turns where reason_deeper was available
     # and the model chose not to call it. Reset per-turn when it IS called.
@@ -257,7 +261,12 @@ def _on_post_llm_call(response_text="", **_):
                 logger.warning("meboya: HARD BREAK")
 
 def _on_transform_llm_output(response_text="", **_):
-    """DOGA-style: strip <world_model> when hide; reasoning stays intact upstream."""
+    """DOGA-style: strip <world_model> when hide; reasoning stays intact upstream.
+
+    fix#13: stash the ORIGINAL (pre-strip) text so post_llm_call telemetry
+    can detect the socratic contract even after hide-mode stripped it.
+    """
+    _state.last_raw_response = response_text or ""
     return _format_show_hide(response_text)
 
 # ── reason_deeper ──
@@ -297,7 +306,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.5\n"
+        return (f"Meboya v2.7.6\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=concise, 2=hats, 3=hats+reason_deeper)\n"
@@ -371,4 +380,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.5 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.6 loaded (DOGA-style + socratic enhancement)")
