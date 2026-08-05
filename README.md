@@ -5,7 +5,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-2.7.2-green)](https://github.com/prajadiputra/Meboya/releases)
+[![Version](https://img.shields.io/badge/version-2.7.3-green)](https://github.com/prajadiputra/Meboya/releases)
 
 ---
 
@@ -119,7 +119,7 @@ hermes gateway restart
 Expected output:
 
 ```
-Meboya v2.7.2
+Meboya v2.7.3
   Enabled: True
   Mode: auto
   Depth: 3 (1=goal, 2=hats, 3=deep+reason_deeper)
