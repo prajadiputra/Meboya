@@ -14,6 +14,21 @@
 
 ---
 
+## ⚠️ About This Project
+
+This is a **personal project**, not a maintained open-source product.
+
+- I am **not a developer** — this is not my field.
+- I built this **100% by vibe** — prompting LLMs until it worked. There is no deep engineering behind it.
+- I will **not actively maintain** this repo.
+- This repo exists **for my own use**, and for anyone who finds it useful.
+- **Found a bug or want a feature?** Fork it and make it yours. No hard feelings.
+- **Stuck on a problem?** Vibe it with your favorite LLM — that's exactly how this came to be.
+
+Use it, fork it, break it, fix it — just don't expect me to be on call. 🫡
+
+---
+
 ## Table of Contents
 
 - [Features](#features)
