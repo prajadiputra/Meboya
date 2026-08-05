@@ -125,9 +125,17 @@ def _socratic_injection(msg):
             "engineering questions (loaded for you, no tool call needed), then fold the "
             "answers into your decision. Do not output raw questions. Cover, per domain: "
             "requirements, assumptions (flag defaults), material risks, and how you will "
-            "verify. Put a contract (Domains considered / Self-answered highlights / "
-            "Assumed (flag if wrong) / Open questions for you (0-3) / Top risks / Plan) "
-            "inside <world_model> before [DECISION]. Domain files loaded:\n" +
+            "verify. "
+            "MANDATORY — you MUST write the contract below INSIDE <world_model>, after the "
+            "hat panel and BEFORE [DECISION]. It is required output, not optional. Keep it "
+            "compact — exact labels, one dense line each, no prose:\n"
+            "- Domains considered: <comma-separated>\n"
+            "- Self-answered: <what you resolved yourself>\n"
+            "- Assumed (flag if wrong): <defaults you assumed — flag explicitly>\n"
+            "- Open questions for you (0-3): <what still needs the user>\n"
+            "- Top risks: <top 2-3>\n"
+            "- Plan: <next step>\n"
+            "If you skip the contract, you fail the task. Domain files loaded:\n" +
             "\n".join("- " + d for d in doms) + "\n\n" + body)
 
 # ── STATE ──
@@ -228,7 +236,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.0+socratic\n"
+        return (f"Meboya v2.7.2\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
@@ -302,4 +310,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.1 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.2 loaded (DOGA-style + socratic enhancement)")
