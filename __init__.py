@@ -1,6 +1,6 @@
 """Meboya — questioning everything. Thinking layer for Hermes Agent."""
 from __future__ import annotations
-import json, logging, random
+import json, logging, os, random
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -70,11 +70,72 @@ CRITICAL_INSTRUCTION = ("Put [WHITE] facts (VERIFIED ONLY — see rule below), [
                         "After [DECISION], ask one natural follow-up question.\n\n"
                         f"{VERIFY_RULE}")
 
+# ── SOCRATIC ENHANCEMENT (core question bank, deterministic injection) ──
+# Self-contained: question files ship inside plugin at socratic/questions/core/.
+# Unlike Socratic SKILL.md, no LLM tool-load round-trip required.
+SOCRATIC_DIR = os.path.join(os.path.dirname(__file__), "socratic", "questions", "core")
+SOCRATIC_ENABLED = True
+# signal word -> domain file (mirrors upstream SKILL.md signal table). "or" = any word.
+SOCRATIC_DOMAINS = [
+    ("ui|page|component|dashboard|form|frontend",        "01-frontend"),
+    ("service|endpoint|job|queue|backend|business logic", "02-backend"),
+    ("database|schema|storage|persistence|migration|cache","03-data"),
+    ("api|sdk|webhook|connector|integration|oauth",       "04-api"),
+    ("authentication|auth|accounts|payments|secrets|public",   "05-security"),
+    ("deploy|ci/cd|container|cloud|scaling|kubernetes|k8s|istio|httproute|eks|cluster|vpc|helm", "06-infra"),
+    ("production|unattended|cron|monitor|observability|rollback","08-observability"),
+    ("ai|llm|agent|prompt|model|rag",                     "09-ai-llm"),
+    ("mobile|ios|android|offline|pwa",                    "10-mobile"),
+    ("workflow|onboarding|cli|ux",                        "11-product-ux"),
+    ("scale|latency|traffic|cost|token",                  "12-cost-performance"),
+    ("regulated|pii|health|finance|minors|license",       "13-compliance"),
+    ("maintained|long-lived|team|legacy",                 "14-team-maintenance"),
+]
+# trigger words = request signals a build/design/review task (vs plain chat)
+SOCRATIC_TRIGGERS = ("build", "design", "scaffold", "architect", "plan", "create",
+                     "implement", "migrate", "migration", "migrasi", "review", "poke holes",
+                     "what am i missing", "what is missing", "bikin", "bangun",
+                     "buatkan", "convert", "apa yang perlu", "apa saja yang perlu",
+                     "tinjau", "audit", "rencana")
+SOCRATIC_BASE = ("00-requirements", "07-testing")  # always included
+
+def _socratic_read(dom):
+    """Read a core question file; return '' if missing/failed."""
+    try:
+        with open(os.path.join(SOCRATIC_DIR, dom + ".md"), encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        logger.debug("socratic read %s:%s", dom, e)
+        return ""
+
+def _socratic_injection(msg):
+    if not SOCRATIC_ENABLED or not msg:
+        return None
+    m = msg.lower()
+    if not any(t in m for t in SOCRATIC_TRIGGERS):
+        return None
+    doms = list(SOCRATIC_BASE)
+    for sig, dom in SOCRATIC_DOMAINS:
+        if any(w.strip() in m for w in sig.split("|")):
+            doms.append(dom)
+    body = "\n\n".join(_socratic_read(d) for d in doms if _socratic_read(d))
+    if not body:
+        return None
+    return ("\n\n---MEBOYA/SOCRATIC: A build/design task detected. Self-answer these "
+            "engineering questions (loaded for you, no tool call needed), then fold the "
+            "answers into your decision. Do not output raw questions. Cover, per domain: "
+            "requirements, assumptions (flag defaults), material risks, and how you will "
+            "verify. Put a contract (Domains considered / Self-answered highlights / "
+            "Assumed (flag if wrong) / Open questions for you (0-3) / Top risks / Plan) "
+            "inside <world_model> before [DECISION]. Domain files loaded:\n" +
+            "\n".join("- " + d for d in doms) + "\n\n" + body)
+
 # ── STATE ──
 class _State:
     enabled=True; depth=3; last_msg=""; complexity="medium"; critical=True
     hats_enabled=True; auto_depth=True; max_recursion=3; show_mode=True
     rd_calls=0; rd_ignored=0; hard_break=False; mc_iters=10000
+    soc_triggered=0; soc_contract=0; soc_tokens_in=0
 _state = _State()
 
 # ── HOOKS ──
@@ -115,6 +176,9 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     injection = f"\n\n---MEBOYA: {guide}"
     # Mnemosyne recall goes to system context, NOT user message injection
     # (prevents PAST: text leaking into [DECISION] Action field)
+    soc = _socratic_injection(user_message)
+    if soc:
+        injection += soc
     return injection
 
 def _on_post_llm_call(response_text="", **_):
@@ -122,6 +186,16 @@ def _on_post_llm_call(response_text="", **_):
     if _state.last_msg:
         c,_=_detect_complexity(_state.last_msg)
         _remember(_state.last_msg,0.7,md={"complexity":c,"depth":_state.depth})
+        # ── SOCRATIC effectiveness telemetry ──
+        injected = bool(_socratic_injection(_state.last_msg))
+        if injected:
+            _state.soc_triggered += 1
+            contract_out = any(k in (response_text or "") for k in
+                               ("Domains considered", "Self-answered", "Assumed (flag if wrong)",
+                                "Open questions for you", "Top risks", "Plan:"))
+            _state.soc_contract += 1 if contract_out else 0
+            _state.soc_tokens_in += len(_socratic_injection(_state.last_msg)) // 4
+            logger.info("socratic: triggered=%s contract=%s", _state.soc_triggered, contract_out)
     if _state.rd_calls>0 and response_text and "reason_deeper" not in response_text:
         _state.rd_ignored+=1
         if _state.rd_ignored>=3: _state.hard_break=True; logger.warning("meboya: HARD BREAK")
@@ -153,7 +227,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.0\n"
+        return (f"Meboya v2.7.0+socratic\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
@@ -164,7 +238,11 @@ def _cmd(a="", **_):
                 f"  MC iters: {_state.mc_iters:,}\n"
                 f"  Max recursion: {_state.max_recursion}\n"
                 f"  reason_deeper: {_state.rd_calls} calls, {_state.rd_ignored} ignored\n"
-                f"  Hard-break: {'ON' if _state.hard_break else 'OFF'}")
+                f"  Hard-break: {'ON' if _state.hard_break else 'OFF'}\n"
+                f"  Socratic: {'ON' if SOCRATIC_ENABLED else 'OFF'}\n"
+                f"    triggered: {_state.soc_triggered} turns\n"
+                f"    contract emitted: {_state.soc_contract}/{_state.soc_triggered} ({(_state.soc_contract*100//_state.soc_triggered) if _state.soc_triggered else 0}%)\n"
+                f"    tokens injected: ~{_state.soc_tokens_in:,}")
     if a=="auto": _state.auto_depth=True; return "auto (depth auto-selected per query)"
     if a.startswith("manual"):
         try:
