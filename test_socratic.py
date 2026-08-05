@@ -38,10 +38,6 @@ doms3 = inj3.split("Domain files loaded:")[1].split("\n\n")[0] if inj3 else ""
 check("includes 06-infra", "- 06-infra" in doms3, doms3)
 check("includes 08-observability", "- 08-observability" in doms3, doms3)
 
-print("=== fixture: agy-routed skip ===")
-out = mb._on_pre_llm_call("[Original request routed via agy-router:] bikin dashboard", is_first_turn=False)
-check("agy skip returns None", out is None)
-
 print("=== fixture: missing file robustness ===")
 import os
 saved = mb.SOCRATIC_DIR

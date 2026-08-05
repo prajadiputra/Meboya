@@ -5,7 +5,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-2.7.1-green)](https://github.com/prajadiputra/Meboya/releases)
+[![Version](https://img.shields.io/badge/version-2.7.2-green)](https://github.com/prajadiputra/Meboya/releases)
 
 ---
 
@@ -119,7 +119,7 @@ hermes gateway restart
 Expected output:
 
 ```
-Meboya v2.6.3
+Meboya v2.7.2
   Enabled: True
   Mode: auto
   Depth: 3 (1=goal, 2=hats, 3=deep+reason_deeper)
@@ -131,6 +131,10 @@ Meboya v2.6.3
   Max recursion: 3
   reason_deeper: 0 calls, 0 ignored
   Hard-break: OFF
+  Socratic: ON
+    triggered: 12 turns
+    contract emitted: 10/12 (83%)
+    tokens injected: ~7,400
 ```
 
 ---
@@ -238,6 +242,14 @@ Dynamic follow-up question
 | `/meboya mc 1000-50000` | Set Monte Carlo simulation iterations (default: 10000) |
 | `/meboya hard-break on` | Manually enable hard-break (blocks reason_deeper) |
 | `/meboya hard-break off` | Manually disable hard-break |
+
+### Socratic
+
+| Command | Description |
+|---|---|
+| `/meboya socratic on` | Enable Socratic question-bank injection (default) |
+| `/meboya socratic off` | Disable Socratic injection — hats only |
+| `/meboya socratic` | Show current Socratic state |
 
 ### Memory (requires Mnemosyne)
 
@@ -406,7 +418,8 @@ Meboya ports DOGA's reasoning architecture (show/hide via `transform_llm_output`
 | Symptom | Fix |
 |---|---|
 | `Unknown command: /meboya` | `hermes plugins enable meboya` + restart gateway |
-| No hat tags in response | Restart gateway — fresh session picks up new guide |
+| No hat tags in response | Check plugin enabled + not disabled via `hats off`. Restart gateway — fresh session picks up new guide |
+| Hats never appear in CLI | Ensure no other plugin strips/redirects the request (e.g. old agy-router). Remove conflicting plugins, restart |
 | `[Thinking Guide]` / `[PAST CONTEXT]` in output | Update to v2.4.3+ (silent wrappers) |
 | Hide still shows hats | Update to v2.6.3+ (fallback strip from [DECISION]) |
 | Model got `tools[X].function.function` 400 error | Update to v2.6.1+ (schema double-wrap fix) |

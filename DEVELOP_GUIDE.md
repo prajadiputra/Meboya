@@ -9,10 +9,19 @@ Guardrails for AI-assisted development. Read before every change.
 ### Trace Hat Injection
 - `pre_llm_call` MUST return injection with `[WHITE]`, `[BLACK]`, `[YELLOW]`, `[GREEN]`, `[BLUE]`
 - `[DECISION]` block: Decision / Key Reason / Risk Accepted / Action
-- `├ CRITICAL:` sub-points in BLACK/GREEN/BLUE when `_state.critical_mode=True`
+- `├ CRITICAL:` sub-points in BLACK/GREEN/BLUE when `_state.critical=True`
 - `<world_model>` block (goal + complexity + scenarios)
 - Follow-up question after `[DECISION]` (dynamic, LLM-determined, NOT template)
 - Verify with `python3 test_trace_hats.py` — must pass before commit
+
+### Socratic Enhancement
+- `_socratic_injection(msg)` fires ONLY on trigger words (build/design/migrate/review/etc.)
+- Contract (Domains considered / Self-answered / Assumed / Open questions / Top risks / Plan) MUST be inside `<world_model>` before `[DECISION]`
+- Contract instruction is MANDATORY — do NOT soften it back to optional
+- Telemetry detector keys: `("Domains considered", "Self-answered", "Assumed (flag if wrong)", "Open questions", "Top risks", "Plan:")` — model drops " for you" from Open questions, detector must stay loose
+- Domain files live at `socratic/questions/core/<NN>-<name>.md` — do NOT rename/remove; `_socratic_read()` returns "" on missing (robust)
+- Verify with `python3 test_socratic.py` — must pass before commit
+- `SOCRATIC_ENABLED` toggle via `/meboya socratic on|off`
 
 ### Plugin Infrastructure
 - `register()` MUST call `ctx.register_hook("pre_llm_call", ...)` and `ctx.register_tool("reason_deeper", ...)`
@@ -23,9 +32,16 @@ Guardrails for AI-assisted development. Read before every change.
 ### State
 - `_state.enabled` default `True`
 - `_state.depth` default `3`
-- `_state.critical_mode` default `True`
+- `_state.critical` default `True` (NOT `critical_mode` — old name, renamed)
+- `_state.hats_enabled` default `True`
+- `_state.show_mode` default `True`
+- `_state.auto_depth` default `True`
+- `_state.max_recursion` default `3`
+- `_state.mc_iters` default `10000`
 - `_state.hard_break` default `False`
 - `_state.rd_calls`, `_state.rd_ignored` default `0`
+- `_state.soc_triggered`, `_state.soc_contract`, `_state.soc_tokens_in` default `0`
+- `SOCRATIC_ENABLED` default `True` (module global)
 
 ### Version Sync (CRITICAL — root cause of repeated failures)
 - **THREE places must match on every release:**
@@ -49,8 +65,11 @@ Guardrails for AI-assisted development. Read before every change.
 ## 🧪 MANDATORY TEST BEFORE COMMIT
 ```bash
 python3 test_trace_hats.py
+python3 test_socratic.py
 ```
-Must return: `✅ ALL TRACE HATS TESTS PASSED`
+Must return:
+- `✅ ALL TRACE HATS TESTS PASSED`
+- `ALL PASS`
 
 On `❌ N FAILURES`: read messages, fix, re-run. Only commit when green.
 
@@ -140,10 +159,16 @@ Call as: `_recall(user_message, k=2)` — NOT `_recall(user_message, top_k=2)`
 - SOUL.md §11 documents Meboya output format
 - If soul.md changes, re-sync to repo SOUL.md
 
+### 8. agy-router conflict (REMOVED)
+- agy-router is REMOVED — do NOT re-add agy skip guard in `pre_llm_call`
+- The old guard `if "[Original request routed via agy-router:]" in user_message: return None` caused hats to never appear in CLI
+- No other plugin should silently skip Meboya injection
+
 ---
 
 ## 📋 PRE-COMMIT CHECKLIST
 - [ ] `python3 test_trace_hats.py` → ✅ PASSED
+- [ ] `python3 test_socratic.py` → ALL PASS
 - [ ] `plugin.yaml` version bumped (if release)
 - [ ] `__init__.py` version string bumped (if release)
 - [ ] `cp` to repo + `git commit` + `git push origin main`

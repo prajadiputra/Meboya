@@ -170,9 +170,6 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     if not _state.enabled: return None
     _state.last_msg = user_message
     if len(user_message.strip()) < 5 and not is_first_turn: return None
-    # Skip DOGA framework if agy-router already handled this request
-    if "[Original request routed via agy-router:]" in user_message:
-        return None
     if not _state.hats_enabled:
         guide = ("Put concise analysis inside <world_model>...</world_model>, then output:\n"
                  "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
@@ -236,7 +233,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.2\n"
+        return (f"Meboya v2.7.3\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
@@ -310,4 +307,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.2 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.3 loaded (DOGA-style + socratic enhancement)")
