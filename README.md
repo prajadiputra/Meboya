@@ -2,6 +2,10 @@
 
 > **Bali: *meboya* = "questioning everything"** — Structured reasoning layer for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Six Thinking Hats + Critical pushback + Socratic question bank + Monte Carlo simulation — all in a single-file plugin.
 
+<p align="center">
+  <img src="assets/logo.jpg" alt="Meboya" width="640"/>
+</p>
+
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-2.7.6-green)](https://github.com/prajadiputra/Meboya/releases)
