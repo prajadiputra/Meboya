@@ -1,0 +1,4 @@
+# Generated artifacts — exclude from language stats
+graphify-out/* linguist-generated=true
+graphify-out/*.json linguist-generated=true
+graphify-out/*.html linguist-generated=true
