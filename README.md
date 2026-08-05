@@ -190,7 +190,7 @@ From a live test with a deploy-plan request:
 ```text
 <world_model>
 [WHITE]
-- EKS PRD = 876683363342, STG = 372232666016 (verified memory).
+- EKS PRD/STG account IDs (verified memory).
 - Nodes CAST AI-managed. Istio mesh + VPA.
 
 [BLACK]
