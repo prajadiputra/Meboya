@@ -102,8 +102,11 @@ SOCRATIC_BASE = ("00-requirements", "07-testing")  # always included
 _socratic_cache = {}
 
 def _socratic_read(dom):
-    """Read a core question file (cached); return '' if missing/failed."""
-    key = (SOCRATIC_DIR, dom)  # cache key includes dir — survives dir swap in tests
+    """Read a core question file (cached); return '' if missing/failed.
+
+    fix#12: only cache SUCCESS; failures retry next turn (no permanent "" cache).
+    """
+    key = (SOCRATIC_DIR, dom)
     if key in _socratic_cache:
         return _socratic_cache[key]
     try:
@@ -113,7 +116,6 @@ def _socratic_read(dom):
         return content
     except Exception as e:
         logger.debug("socratic read %s:%s", dom, e)
-        _socratic_cache[key] = ""
         return ""
 
 def _word_in(text, word):
@@ -133,13 +135,19 @@ def _socratic_injection(msg):
     body = "\n\n".join(x for x in (_socratic_read(d) for d in dict.fromkeys(doms)) if x)
     if not body:
         return None
+    # fix#11: contract placement adapts to depth — depth<2 has no hat panel
+    if _state.depth < 2 or not _state.hats_enabled:
+        placement = ("MANDATORY — you MUST write the contract below INSIDE <world_model>, "
+                     "BEFORE [DECISION]. It is required output, not optional.")
+    else:
+        placement = ("MANDATORY — you MUST write the contract below INSIDE <world_model>, after the "
+                     "hat panel and BEFORE [DECISION]. It is required output, not optional.")
     return ("\n\n---MEBOYA/SOCRATIC: A build/design task detected. Self-answer these "
             "engineering questions (loaded for you, no tool call needed), then fold the "
             "answers into your decision. Do not output raw questions. Cover, per domain: "
             "requirements, assumptions (flag defaults), material risks, and how you will "
             "verify. "
-            "MANDATORY — you MUST write the contract below INSIDE <world_model>, after the "
-            "hat panel and BEFORE [DECISION]. It is required output, not optional. Keep it "
+            + placement + " Keep it "
             "compact — exact labels, one dense line each, no prose:\n"
             "- Domains considered: <comma-separated>\n"
             "- Self-answered: <what you resolved yourself>\n"
@@ -172,7 +180,13 @@ def _format_show_hide(response_text=""):
     cleaned = re.sub(r"<world_model>.*?</world_model>", "", response_text, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"</?world_model>\s*", "", cleaned, flags=re.IGNORECASE).strip()
     hat_tags = ("[WHITE]", "[BLACK]", "[RED]", "[YELLOW]", "[GREEN]", "[BLUE]")
-    if any(t in cleaned for t in hat_tags):
+    # fix#5b: match hats even when bulleted/- prefixed, and CRITICAL continuation lines
+    def _is_hat_line(ln):
+        s = ln.lstrip()
+        return any(s.startswith(t) for t in hat_tags) or s.startswith("├ CRITICAL") or (
+            any(t in s for t in hat_tags) and (s.startswith("-") or s.startswith("*") or s.startswith("•"))
+        )
+    if any(t in cleaned for t in hat_tags) or any(_is_hat_line(l) for l in cleaned.splitlines()):
         m = re.search(r"(?m)^\[DECISION\]", cleaned)
         if m:
             cleaned = cleaned[m.start():].strip()
@@ -182,11 +196,12 @@ def _format_show_hide(response_text=""):
             lines = cleaned.splitlines()
             last_hat = -1
             for i, ln in enumerate(lines):
-                if any(ln.lstrip().startswith(t) for t in hat_tags) or ln.lstrip().startswith("├ CRITICAL"):
+                if _is_hat_line(ln):
                     last_hat = i
             if last_hat >= 0:
                 cleaned = "\n".join(lines[last_hat + 1:]).strip()
-    return cleaned or response_text
+    # fix#5c: never return raw when hide emptied everything (avoid panel leak)
+    return cleaned
 
 
 def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
@@ -248,17 +263,30 @@ def _on_transform_llm_output(response_text="", **_):
 # ── reason_deeper ──
 def reason_deeper(level=2, focus="black hat", scenarios=None, **_):
     if _state.hard_break: return "[HARD BREAK] reason_deeper blocked."
-    _state.rd_calls+=1
+    _state.rd_calls += 1
+    _state.rd_ignored = 0  # fix#4: tool actually used — reset skip streak here (not just via text match)
     q={"black hat":"Worst-case missed?","green hat":"What dismissed too quickly?",
        "red hat":"Gut reservation?","blue hat":"Framework sound?"}.get(focus,"What missed?")
+    # fix#8: enforce max_recursion — clamp level so the setting has real effect
+    level = max(1, min(int(level or 2), _state.max_recursion))
     mc=""
     if scenarios:
         try:
-            p=json.loads(scenarios)
-            if isinstance(p,list) and all(isinstance(s,list) and len(s)==2 for s in p):
-                r=monte_carlo_simulate([(s[0],s[1]) for s in p],_state.mc_iters*level)
-                mc=f"\nMC({r['iterations']}): Winner={r['winner']}, conf={r['confidence']:.1%}"
-        except Exception: pass
+            # fix#6b: accept either JSON string OR already-parsed list; coerce float
+            if isinstance(scenarios, str):
+                p = json.loads(scenarios)
+            else:
+                p = scenarios
+            pairs = []
+            for s in p:
+                label = s[0]
+                weight = float(s[1]) if not isinstance(s[1], bool) else (1.0 if s[1] else 0.0)
+                pairs.append((str(label), weight))
+            if pairs and all(isinstance(s, (list, tuple)) and len(s) == 2 for s in p):
+                r = monte_carlo_simulate(pairs, _state.mc_iters * level)
+                mc = f"\nMC({r['iterations']}): Winner={r['winner']}, conf={r['confidence']:.1%}"
+        except Exception:
+            pass
     return f"[reason_deeper {focus}]\n{q}{mc}\n[end]"
 
 # ── COMMAND ──
@@ -269,7 +297,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.4\n"
+        return (f"Meboya v2.7.5\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=concise, 2=hats, 3=hats+reason_deeper)\n"
@@ -343,4 +371,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.4 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.5 loaded (DOGA-style + socratic enhancement)")
