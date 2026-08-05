@@ -22,7 +22,6 @@
 - [Built-in Tool: `reason_deeper`](#built-in-tool-reason_deeper)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
-- [Knowledge Graph](#knowledge-graph)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 - [License](#license)
@@ -414,36 +413,6 @@ All configuration is via `/meboya` subcommands (see [Commands](#commands-complet
 | MC iterations | `10000` | `/meboya mc 1000-50000` |
 | socratic | `True` | `/meboya socratic on\|off` |
 | hard-break | `False` | `/meboya hard-break on\|off` |
-
----
-
-## Knowledge Graph
-
-Generated with [graphify](https://github.com/Graphify-Labs/graphify) — local AST parsing, **0 LLM tokens**. Artifacts in [`graphify-out/`](graphify-out/) (`graph.json`, `graph.html`, [`GRAPH_REPORT.md`](graphify-out/GRAPH_REPORT.md)).
-
-**31 nodes · 49 edges · 9 communities · 92% EXTRACTED / 8% INFERRED**
-
-### God Nodes (core abstractions, by degree)
-
-| # | Node | Edges | Role |
-|---|---|---|---|
-| 1 | `register()` | 7 | Entry point — mounts 3 hooks + tool + command |
-| 2 | `_on_post_llm_call()` | 6 | Detect complexity + `_remember()` + hard-break + socratic telemetry |
-| 3 | `_on_pre_llm_call()` | 5 | Inject hat guide + socratic question bank |
-| 4 | `_Ctx` | 5 | Test harness context |
-| 5 | `_socratic_injection()` | 4 | Signal detection + domain mapping + question-bank injection |
-| 6 | `_format_show_hide()` | 4 | Strip `<world_model>`, keep `[DECISION]` |
-| 7 | `_on_transform_llm_output()` | 4 | Show/hide dispatch |
-| 8 | `reason_deeper()` | 4 | Recursive self-critique tool |
-| 9 | `_cmd()` | 4 | `/meboya` command handler |
-| 10 | `_detect_complexity()` | 3 | Auto-depth heuristic |
-
-Rebuild after code changes:
-
-```bash
-graphify . --code-only --out graphify-out
-graphify cluster-only .
-```
 
 ---
 
