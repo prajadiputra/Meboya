@@ -200,7 +200,7 @@ def _on_post_llm_call(response_text="", **_):
             _state.soc_triggered += 1
             contract_out = any(k in (response_text or "") for k in
                                ("Domains considered", "Self-answered", "Assumed (flag if wrong)",
-                                "Open questions for you", "Top risks", "Plan:"))
+                                "Open questions", "Top risks", "Plan:"))
             _state.soc_contract += 1 if contract_out else 0
             _state.soc_tokens_in += len(_socratic_injection(_state.last_msg)) // 4
             logger.info("socratic: triggered=%s contract=%s", _state.soc_triggered, contract_out)
