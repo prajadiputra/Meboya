@@ -222,6 +222,7 @@ def reason_deeper(level=2, focus="black hat", scenarios=None, **_):
 
 # ── COMMAND ──
 def _cmd(a="", **_):
+    global SOCRATIC_ENABLED
     a=a.strip().lower() if a else ""
     if a=="on": _state.enabled=True; return "ON"
     if a=="off": _state.enabled=False; return "OFF"
@@ -268,6 +269,13 @@ def _cmd(a="", **_):
     if a.startswith("mc"):
         try: i=int(a.split()[1]); assert 1000<=i<=50000; _state.mc_iters=i; return f"mc {i}"
         except: return "mc 1000-50000"
+    if a.startswith("socratic"):
+        if a == "socratic on": SOCRATIC_ENABLED = True; return "Socratic ON"
+        if a == "socratic off": SOCRATIC_ENABLED = False; return "Socratic OFF"
+        if a == "socratic":
+            return ("Socratic enhancement: on|off  "
+                    f"(currently {'ON' if SOCRATIC_ENABLED else 'OFF'})")
+        return "socratic: on|off"
     if a=="memory on": return "memory: controlled via config.yaml"
     if a=="memory off": return "memory: disabled via config.yaml"
     if a=="reset": _state.rd_calls=_state.rd_ignored=0; _state.hard_break=False; return "reset"
@@ -275,7 +283,7 @@ def _cmd(a="", **_):
         if not MNEMOSYNE_AVAILABLE: return "No Mnemosyne"
         e=_recall(_state.last_msg or "recent",3)
         return "Past:\n"+"\n".join(f"[{x.get('metadata',{}).get('goal_type','?')}] {x.get('content','')[:80]}" for x in e) if e else "empty"
-    return "meboya: on|off|status|auto|manual|depth|hats|show|hide|critical|memory|max_recursion|mc|hard-break|reset|recall"
+    return "meboya: on|off|status|auto|manual|depth|hats|show|hide|critical|memory|max_recursion|mc|socratic|hard-break|reset|recall"
 
 def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
@@ -294,4 +302,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.0 loaded (DOGA-style)")
+    logger.info("meboya v2.7.1 loaded (DOGA-style + socratic enhancement)")
