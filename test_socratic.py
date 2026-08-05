@@ -42,8 +42,10 @@ print("=== fixture: missing file robustness ===")
 import os
 saved = mb.SOCRATIC_DIR
 mb.SOCRATIC_DIR = "/nonexistent"
+mb._socratic_cache.clear()  # cache fix: must clear or cached entries leak in
 check("missing dir -> None", mb._socratic_injection("build sesuatu") is None)
 mb.SOCRATIC_DIR = saved
+mb._socratic_cache.clear()
 
 print()
 if fails:

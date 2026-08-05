@@ -1,6 +1,6 @@
 """Meboya — questioning everything. Thinking layer for Hermes Agent."""
 from __future__ import annotations
-import json, logging, os, random
+import json, logging, os, random, re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -99,26 +99,38 @@ SOCRATIC_TRIGGERS = ("build", "design", "scaffold", "architect", "plan", "create
                      "tinjau", "audit", "rencana")
 SOCRATIC_BASE = ("00-requirements", "07-testing")  # always included
 
+_socratic_cache = {}
+
 def _socratic_read(dom):
-    """Read a core question file; return '' if missing/failed."""
+    """Read a core question file (cached); return '' if missing/failed."""
+    key = (SOCRATIC_DIR, dom)  # cache key includes dir — survives dir swap in tests
+    if key in _socratic_cache:
+        return _socratic_cache[key]
     try:
         with open(os.path.join(SOCRATIC_DIR, dom + ".md"), encoding="utf-8") as f:
-            return f.read()
+            content = f.read()
+        _socratic_cache[key] = content
+        return content
     except Exception as e:
         logger.debug("socratic read %s:%s", dom, e)
+        _socratic_cache[key] = ""
         return ""
+
+def _word_in(text, word):
+    """Word-boundary match: 'plan' not in 'explanation'; 'ui' not in 'quick'."""
+    return re.search(r"(?<![a-z0-9])" + re.escape(word.lower()) + r"(?![a-z0-9])", text) is not None
 
 def _socratic_injection(msg):
     if not SOCRATIC_ENABLED or not msg:
         return None
     m = msg.lower()
-    if not any(t in m for t in SOCRATIC_TRIGGERS):
+    if not any(_word_in(m, t) for t in SOCRATIC_TRIGGERS):
         return None
     doms = list(SOCRATIC_BASE)
     for sig, dom in SOCRATIC_DOMAINS:
-        if any(w.strip() in m for w in sig.split("|")):
+        if any(_word_in(m, w) for w in sig.split("|") if w.strip()):
             doms.append(dom)
-    body = "\n\n".join(_socratic_read(d) for d in doms if _socratic_read(d))
+    body = "\n\n".join(x for x in (_socratic_read(d) for d in dict.fromkeys(doms)) if x)
     if not body:
         return None
     return ("\n\n---MEBOYA/SOCRATIC: A build/design task detected. Self-answer these "
@@ -151,7 +163,8 @@ def _format_show_hide(response_text=""):
     """DOGA-style: strip thinking panel when hide; keep [DECISION] + follow-up.
 
     Primary path: strip closed <world_model>...</world_model>.
-    Fallback: if model emits [WHITE]...[BLUE] outside tags, keep from [DECISION] onward.
+    Fallback: if model emits [WHITE]...[BLUE] outside tags, keep from [DECISION] onward;
+    if [DECISION] is missing entirely, drop the hat block and keep trailing text.
     """
     if not response_text or _state.show_mode:
         return response_text
@@ -163,6 +176,16 @@ def _format_show_hide(response_text=""):
         m = re.search(r"(?m)^\[DECISION\]", cleaned)
         if m:
             cleaned = cleaned[m.start():].strip()
+        else:
+            # no DECISION marker — drop the hat block (up to the last hat line),
+            # keep whatever follows (conclusion / follow-up)
+            lines = cleaned.splitlines()
+            last_hat = -1
+            for i, ln in enumerate(lines):
+                if any(ln.lstrip().startswith(t) for t in hat_tags) or ln.lstrip().startswith("├ CRITICAL"):
+                    last_hat = i
+            if last_hat >= 0:
+                cleaned = "\n".join(lines[last_hat + 1:]).strip()
     return cleaned or response_text
 
 
@@ -170,7 +193,9 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     if not _state.enabled: return None
     _state.last_msg = user_message
     if len(user_message.strip()) < 5 and not is_first_turn: return None
-    if not _state.hats_enabled:
+    # Depth-gated guide selection (fix: depth was ignored)
+    depth = _state.depth
+    if not _state.hats_enabled or depth < 2:
         guide = ("Put concise analysis inside <world_model>...</world_model>, then output:\n"
                  "[DECISION]\n- Decision:\n- Key Reason:\n- Risk Accepted:\n- Action:\n"
                  "Ask one natural follow-up question after [DECISION].")
@@ -179,6 +204,10 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
     c,_ = _detect_complexity(user_message); _state.complexity = c
     _state.hard_break = False
     injection = f"\n\n---MEBOYA: {guide}"
+    # depth >= 3: hint model may use reason_deeper tool
+    if depth >= 3:
+        injection += ("\n(You have the reason_deeper tool available — use it for self-critique "
+                      "when the decision carries real risk.)")
     # Mnemosyne recall goes to system context, NOT user message injection
     # (prevents PAST: text leaking into [DECISION] Action field)
     soc = _socratic_injection(user_message)
@@ -201,9 +230,16 @@ def _on_post_llm_call(response_text="", **_):
             _state.soc_contract += 1 if contract_out else 0
             _state.soc_tokens_in += len(_socratic_injection(_state.last_msg)) // 4
             logger.info("socratic: triggered=%s contract=%s", _state.soc_triggered, contract_out)
-    if _state.rd_calls>0 and response_text and "reason_deeper" not in response_text:
-        _state.rd_ignored+=1
-        if _state.rd_ignored>=3: _state.hard_break=True; logger.warning("meboya: HARD BREAK")
+    # Hard-break: track ONLY consecutive turns where reason_deeper was available
+    # and the model chose not to call it. Reset per-turn when it IS called.
+    if _state.rd_calls > 0 and response_text:
+        if "reason_deeper" in response_text:
+            _state.rd_ignored = 0  # tool was used — reset streak
+        else:
+            _state.rd_ignored += 1
+            if _state.rd_ignored >= 3:
+                _state.hard_break = True
+                logger.warning("meboya: HARD BREAK")
 
 def _on_transform_llm_output(response_text="", **_):
     """DOGA-style: strip <world_model> when hide; reasoning stays intact upstream."""
@@ -233,10 +269,10 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.3\n"
+        return (f"Meboya v2.7.4\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
-                f"  Depth: {_state.depth} (1=goal, 2=hats, 3=deep+reason_deeper)\n"
+                f"  Depth: {_state.depth} (1=concise, 2=hats, 3=hats+reason_deeper)\n"
                 f"  Hats: {'ON' if _state.hats_enabled else 'OFF'}\n"
                 f"  Show: {'ON' if _state.show_mode else 'OFF (panel hidden)'}\n"
                 f"  Critical: {'ON' if _state.critical else 'OFF'}\n"
@@ -307,4 +343,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.3 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.4 loaded (DOGA-style + socratic enhancement)")

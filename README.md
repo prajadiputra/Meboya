@@ -5,7 +5,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-2.7.3-green)](https://github.com/prajadiputra/Meboya/releases)
+[![Version](https://img.shields.io/badge/version-2.7.4-green)](https://github.com/prajadiputra/Meboya/releases)
 
 ---
 
@@ -119,10 +119,10 @@ hermes gateway restart
 Expected output:
 
 ```
-Meboya v2.7.3
+Meboya v2.7.4
   Enabled: True
   Mode: auto
-  Depth: 3 (1=goal, 2=hats, 3=deep+reason_deeper)
+  Depth: 3 (1=concise, 2=hats, 3=hats+reason_deeper)
   Hats: ON
   Show: ON
   Critical: ON
@@ -161,10 +161,10 @@ hermes gateway restart
 
 ### Show (default)
 
-Full hats visible:
+Full hats visible (inside `<world_model>` per injection):
 
 ```
-&lt;world_model&gt;Reasoning: 1-2 sentence internal reasoning&lt;/world_model&gt;
+<world_model>
 [WHITE] facts
 [BLACK] risks
   ├ CRITICAL: hardest pushback
@@ -174,6 +174,7 @@ Full hats visible:
   ├ CRITICAL: what's the opposite approach?
 [BLUE] synthesis
   ├ CRITICAL: second-order effects?
+</world_model>
 
 [DECISION]
 - Decision: ...
@@ -215,10 +216,10 @@ Dynamic follow-up question
 
 | Command | Description |
 |---|---|
-| `/meboya auto` | Automatic depth per query (default) |
-| `/meboya manual low` | Force depth 1 (goal detection only) |
-| `/meboya manual medium` | Force depth 2 (goal + hats) |
-| `/meboya manual high` | Force depth 3 (goal + hats + reason_deeper) |
+| `/meboya auto` | Automatic depth per query (default — complexity→depth) |
+| `/meboya manual low` | Force depth 1 (concise analysis, no hats) |
+| `/meboya manual medium` | Force depth 2 (hats + decision) |
+| `/meboya manual high` | Force depth 3 (hats + reason_deeper hint) |
 | `/meboya depth 1` | Same as manual low (shortcut) |
 | `/meboya depth 2` | Same as manual medium (shortcut) |
 | `/meboya depth 3` | Same as manual high (shortcut) |
