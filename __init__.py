@@ -164,18 +164,19 @@ def _socratic_injection(msg):
 #   - "cli", "tui", "acp", "desktop"  → interactive coding / terminal / desktop chat
 #   - "" (empty)                     → CLI fallback when no session env is bound (oneshot)
 # Everything else: telegram, discord, whatsapp, slack, api_server, cron, subagent, ...
-# → auto-hide. telemetry (`_on_post_llm_call`) and the `/meboya` command STILL RUN.
+# → panel auto-HIDDEN from the output (transform_llm_output strips it).
+# Reasoning + injection still run on every surface; the plugin stays enabled
+# everywhere; telemetry (`_on_post_llm_call`) and `/meboya` keep working.
 HATS_PLATFORMS = frozenset({"cli", "tui", "acp", "desktop", ""})
 
 
 def _is_hats_surface(platform=""):
-    """True only on surfaces where the user reads the hats panel directly.
+    """True on surfaces where the user reads the hats panel directly.
 
-    Subagents are the key exclusion: they inherit `_state` in-process from the
-    parent agent, so show/hide state is shared. A subagent must stay fully
-    hidden — it is invisible to the user — while its parent's surface decides
-    what the HUMAN sees. Only the parent turn (platform in HATS_PLATFORMS AND
-    role files not `subagent`) receives the hats injection.
+    Interactive local surfaces (cli/tui/acp/desktop) show the panel; empty
+    platform (CLI oneshot) also shows. Messaging platforms (telegram, ...),
+    cron, subagents → False: panel auto-hidden from the OUTPUT (reasoning
+    still runs — the injection happens in pre_llm_call regardless).
     """
     p = str(platform or "").strip().lower()
     if p not in HATS_PLATFORMS:
@@ -193,14 +194,14 @@ class _State:
 _state = _State()
 
 # ── HOOKS ──
-def _format_show_hide(response_text=""):
+def _format_show_hide(response_text="", force_hide=False):
     """DOGA-style: strip thinking panel when hide; keep [DECISION] + follow-up.
 
     Primary path: strip closed <world_model>...</world_model>.
     Fallback: if model emits [WHITE]...[BLUE] outside tags, keep from [DECISION] onward;
     if [DECISION] is missing entirely, drop the hat block and keep trailing text.
     """
-    if not response_text or _state.show_mode:
+    if not response_text or (_state.show_mode and not force_hide):
         return response_text
     import re
     cleaned = re.sub(r"<world_model>.*?</world_model>", "", response_text, flags=re.DOTALL | re.IGNORECASE)
@@ -230,16 +231,11 @@ def _format_show_hide(response_text=""):
     return cleaned
 
 
-def _on_pre_llm_call(user_message="", is_first_turn=False, platform="", **_):
-    # Platform gate: the panel is a LOCAL interactive surface (CLI/TUI/desktop/
-    # ACP). On messaging platforms (telegram/discord/...) or non-interactive
-    # substrates (cron, subagents) we skip the injection entirely — reasoning
-    # stays plain, but the plugin itself remains loaded and functional.
-    # subagents additionally inherit _state from the parent, so they must never
-    # be the surface that decides what the user sees.
-    if not _is_hats_surface(platform):
-        _state.last_msg = user_message  # telemetry still records the turn
-        return None
+def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
+    # NOTE: no platform gate here — Meboya reasoning runs on EVERY surface
+    # (messaging platforms included). Whether the user SEES the panel is
+    # decided in _on_transform_llm_output (auto-hide off interactive
+    # surfaces), not by skipping the injection.
     if not _state.enabled: return None
     _state.last_msg = user_message
     if len(user_message.strip()) < 5 and not is_first_turn: return None
@@ -265,13 +261,8 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, platform="", **_):
         injection += soc
     return injection
 
-def _on_post_llm_call(response_text="", platform="", **_):
+def _on_post_llm_call(response_text="", **_):
     if not _state.enabled: return
-    # Platform gate: on messaging/non-interactive surfaces we skipped the
-    # injection in pre_llm_call; telemetry must not count turns that never
-    # received the panel (would falsely inflate the socratic ratio).
-    if not _is_hats_surface(platform):
-        return
     if _state.last_msg:
         c,_=_detect_complexity(_state.last_msg)
         _remember(_state.last_msg,0.7,md={"complexity":c,"depth":_state.depth})
@@ -299,13 +290,26 @@ def _on_post_llm_call(response_text="", platform="", **_):
                 _state.hard_break = True
                 logger.warning("meboya: HARD BREAK")
 
-def _on_transform_llm_output(response_text="", **_):
+def _on_transform_llm_output(response_text="", platform="", **_):
     """DOGA-style: strip <world_model> when hide; reasoning stays intact upstream.
+
+    Platform-aware auto-hide (v2.7.8): on interactive surfaces (CLI/TUI/
+    desktop/ACP) the panel renders per `_state.show_mode` — Show: ON by
+    default. On messaging surfaces (telegram/discord/whatsapp/...) and
+    non-interactive substrates (cron/subagent), the panel is ALWAYS hidden
+    regardless of show_mode: Meboya reasoning still runs (injection was not
+    skipped), only the presentation is stripped. `/meboya show` forces it
+    back on even there.
 
     fix#13: stash the ORIGINAL (pre-strip) text so post_llm_call telemetry
     can detect the socratic contract even after hide-mode stripped it.
     """
     _state.last_raw_response = response_text or ""
+    # Non-interactive / messaging surface → ALWAYS hide the panel from the
+    # output, regardless of show_mode. (Meboya reasoning already ran; this
+    # only strips presentation.) /meboya show forces it back on.
+    if not _is_hats_surface(platform):
+        return _format_show_hide(response_text, force_hide=True)
     return _format_show_hide(response_text)
 
 # ── reason_deeper ──
@@ -345,7 +349,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.7\n"
+        return (f"Meboya v2.7.8\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=concise, 2=hats, 3=hats+reason_deeper)\n"
@@ -419,4 +423,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.7 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.8 loaded (DOGA-style + socratic enhancement)")
