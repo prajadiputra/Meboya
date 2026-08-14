@@ -158,6 +158,31 @@ def _socratic_injection(msg):
             "If you skip the contract, you fail the task. Domain files loaded:\n" +
             "\n".join("- " + d for d in doms) + "\n\n" + body)
 
+# Platform surfaces where the de Bono hats panel is DESIRED.
+# Verified from Hermes gateway session tagging (gateway/config.py Platform,
+# tui_gateway/server.py `_resolve_session_platform`, apps/desktop session-source.ts):
+#   - "cli", "tui", "acp", "desktop"  → interactive coding / terminal / desktop chat
+#   - "" (empty)                     → CLI fallback when no session env is bound (oneshot)
+# Everything else: telegram, discord, whatsapp, slack, api_server, cron, subagent, ...
+# → auto-hide. telemetry (`_on_post_llm_call`) and the `/meboya` command STILL RUN.
+HATS_PLATFORMS = frozenset({"cli", "tui", "acp", "desktop", ""})
+
+
+def _is_hats_surface(platform=""):
+    """True only on surfaces where the user reads the hats panel directly.
+
+    Subagents are the key exclusion: they inherit `_state` in-process from the
+    parent agent, so show/hide state is shared. A subagent must stay fully
+    hidden — it is invisible to the user — while its parent's surface decides
+    what the HUMAN sees. Only the parent turn (platform in HATS_PLATFORMS AND
+    role files not `subagent`) receives the hats injection.
+    """
+    p = str(platform or "").strip().lower()
+    if p not in HATS_PLATFORMS:
+        return False
+    return True
+
+
 # ── STATE ──
 class _State:
     enabled=True; depth=3; last_msg=""; complexity="medium"; critical=True
@@ -205,7 +230,16 @@ def _format_show_hide(response_text=""):
     return cleaned
 
 
-def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
+def _on_pre_llm_call(user_message="", is_first_turn=False, platform="", **_):
+    # Platform gate: the panel is a LOCAL interactive surface (CLI/TUI/desktop/
+    # ACP). On messaging platforms (telegram/discord/...) or non-interactive
+    # substrates (cron, subagents) we skip the injection entirely — reasoning
+    # stays plain, but the plugin itself remains loaded and functional.
+    # subagents additionally inherit _state from the parent, so they must never
+    # be the surface that decides what the user sees.
+    if not _is_hats_surface(platform):
+        _state.last_msg = user_message  # telemetry still records the turn
+        return None
     if not _state.enabled: return None
     _state.last_msg = user_message
     if len(user_message.strip()) < 5 and not is_first_turn: return None
@@ -231,8 +265,13 @@ def _on_pre_llm_call(user_message="", is_first_turn=False, **_):
         injection += soc
     return injection
 
-def _on_post_llm_call(response_text="", **_):
+def _on_post_llm_call(response_text="", platform="", **_):
     if not _state.enabled: return
+    # Platform gate: on messaging/non-interactive surfaces we skipped the
+    # injection in pre_llm_call; telemetry must not count turns that never
+    # received the panel (would falsely inflate the socratic ratio).
+    if not _is_hats_surface(platform):
+        return
     if _state.last_msg:
         c,_=_detect_complexity(_state.last_msg)
         _remember(_state.last_msg,0.7,md={"complexity":c,"depth":_state.depth})
@@ -306,7 +345,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.6\n"
+        return (f"Meboya v2.7.7\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=concise, 2=hats, 3=hats+reason_deeper)\n"
@@ -380,4 +419,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.6 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.7 loaded (DOGA-style + socratic enhancement)")
