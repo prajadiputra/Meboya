@@ -357,7 +357,7 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.8\n"
+        return (f"Meboya v2.7.9\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=concise, 2=hats, 3=hats+reason_deeper)\n"
@@ -431,4 +431,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.8 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.9 loaded (DOGA-style + socratic enhancement)")
