@@ -8,7 +8,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-2.7.6-green)](https://github.com/prajadiputra/Meboya/releases)
+[![Version](https://img.shields.io/badge/version-2.7.9-green)](https://github.com/prajadiputra/Meboya/releases)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](test_trace_hats.py)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/prajadiputra/Meboya/pulls)
 
@@ -43,6 +43,7 @@ Use it, fork it, break it, fix it — just don't expect me to be on call. 🫡
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Changelog](#changelog)
 - [License](#license)
 - [Credits](#credits)
 
@@ -135,7 +136,7 @@ Bikin rencana deploy service ke EKS pakai helm
 Expected `/meboya status`:
 
 ```
-Meboya v2.7.6
+Meboya v2.7.9
   Enabled: True
   Mode: auto
   Depth: 3 (1=concise, 2=hats, 3=hats+reason_deeper)
@@ -461,6 +462,19 @@ python3 test_trace_hats.py   # must pass before every commit
 python3 test_socratic.py     # must pass before every commit
 ```
 
+
+---
+
+## Changelog
+
+### v2.7.9 — lazy Mnemosyne connect fix
+
+- **Fix:** connect to Mnemosyne lazily, on first use, instead of probing at import time. The import-time probe ran during Hermes' plugin *discovery*, but the `mnemosyne` core only lands on `sys.path` when the memory provider *activates* — which happens after discovery — so the probe always failed and `/meboya status` showed `Mnemosyne: N` while `_remember` / `_recall` silently no-op'd.
+- **Why now:** Hermes 0.21.5 swapped the gateway's runtime interpreter. The old one happened to have `mnemosyne` importable on the default `sys.path`; the bundled one does not (import succeeds only once the provider wrapper prepends its venv).
+- **Behaviour:** `_connect()` caches on success and does **not** latch failure, so it self-heals once the provider is up. No config changes required.
+- Full notes: [v2.7.9 release](https://github.com/prajadiputra/Meboya/releases/tag/v2.7.9) · [PR #1](https://github.com/prajadiputra/Meboya/pull/1)
+
+All releases: <https://github.com/prajadiputra/Meboya/releases>
 
 ---
 
