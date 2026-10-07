@@ -5,21 +5,29 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-MNEMOSYNE_AVAILABLE = False; _mnemosyne = None
-try:
-    from mnemosyne import Mnemosyne
-    _mnemosyne = Mnemosyne(); MNEMOSYNE_AVAILABLE = True
-    logger.info("meboya: Mnemosyne connected")
-except Exception:
-    pass
+_mnemosyne = None
+def _connect():
+    # Lazy: the 'mnemosyne' core only lands on sys.path when the memory
+    # provider activates (which runs AFTER plugin discovery), so an
+    # import-time probe is always False. Connect on first use instead;
+    # retry until success (no failure latch) so it self-heals.
+    global _mnemosyne
+    if _mnemosyne is not None: return _mnemosyne
+    try:
+        from mnemosyne import Mnemosyne
+        _mnemosyne = Mnemosyne()
+        logger.info("meboya: Mnemosyne connected")
+    except Exception:
+        pass
+    return _mnemosyne
 
 def _remember(c, im=0.7, s="meboya", md=None):
-    if not MNEMOSYNE_AVAILABLE: return None
+    if not _connect(): return None
     try: return _mnemosyne.remember(content=c, importance=im, source=s, metadata=md or {})
     except Exception as e: logger.debug("meboya: remember:%s",e); return None
 
 def _recall(q, k=3):
-    if not MNEMOSYNE_AVAILABLE: return []
+    if not _connect(): return []
     try: return _mnemosyne.recall(q, top_k=k) or []
     except Exception: return []
 
@@ -349,14 +357,14 @@ def _cmd(a="", **_):
     if a=="off": _state.enabled=False; return "OFF"
     if a=="status":
         mode = "auto" if _state.auto_depth else "manual"
-        return (f"Meboya v2.7.8\n"
+        return (f"Meboya v2.7.9\n"
                 f"  Enabled: {_state.enabled}\n"
                 f"  Mode: {mode}\n"
                 f"  Depth: {_state.depth} (1=concise, 2=hats, 3=hats+reason_deeper)\n"
                 f"  Hats: {'ON' if _state.hats_enabled else 'OFF'}\n"
                 f"  Show: {'ON' if _state.show_mode else 'OFF (panel hidden)'}\n"
                 f"  Critical: {'ON' if _state.critical else 'OFF'}\n"
-                f"  Mnemosyne: {'Y' if MNEMOSYNE_AVAILABLE else 'N'}\n"
+                f"  Mnemosyne: {'Y' if _connect() else 'N'}\n"
                 f"  MC iters: {_state.mc_iters:,}\n"
                 f"  Max recursion: {_state.max_recursion}\n"
                 f"  reason_deeper: {_state.rd_calls} calls, {_state.rd_ignored} ignored\n"
@@ -401,7 +409,7 @@ def _cmd(a="", **_):
     if a=="memory off": return "memory: disabled via config.yaml"
     if a=="reset": _state.rd_calls=_state.rd_ignored=0; _state.hard_break=False; return "reset"
     if a=="recall":
-        if not MNEMOSYNE_AVAILABLE: return "No Mnemosyne"
+        if not _connect(): return "No Mnemosyne"
         e=_recall(_state.last_msg or "recent",3)
         return "Past:\n"+"\n".join(f"[{x.get('metadata',{}).get('goal_type','?')}] {x.get('content','')[:80]}" for x in e) if e else "empty"
     return "meboya: on|off|status|auto|manual|depth|hats|show|hide|critical|memory|max_recursion|mc|socratic|hard-break|reset|recall"
@@ -423,4 +431,4 @@ def register(ctx):
             level=a.get("level",2), focus=a.get("focus","black hat"),
             scenarios=a.get("scenarios",None)))
     ctx.register_command(name="meboya", handler=_cmd, description="Configure Meboya")
-    logger.info("meboya v2.7.8 loaded (DOGA-style + socratic enhancement)")
+    logger.info("meboya v2.7.9 loaded (DOGA-style + socratic enhancement)")
